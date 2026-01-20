@@ -680,7 +680,10 @@ def reminder_for_prompt(project_dir: str, prompt: str = "") -> str:
             for tool in other_tools[:2]:  # Show top 2 alternatives
                 lines.append(f"  • {tool}")
             lines.append("")
-            lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+            lines.append("Think first, code later. Mistakes cost 2-10x to fix:")
+            lines.append("  • Wrong approach = wasted days of work")
+            lines.append("  • Missing requirements = rebuild from scratch")
+            lines.append("  • Bad architecture = months of refactoring")
             lines.append("")
             lines.append("⚠️" * 15)
             lines.append("")
@@ -844,7 +847,7 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
         lines.append("  2. think_explore: Explore alternative solutions")
         lines.append("  3. think_research: Research the problem deeper")
         lines.append("")
-        lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+        lines.append("Death spirals waste hours. Step back, think, then code.")
         lines.append("")
         lines.append("🛑" * 15)
         has_content = True
@@ -886,7 +889,11 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
                 lines.append("  • think_research: Research secure implementation patterns")
                 lines.append("  • think_compare: Compare security approaches")
                 lines.append("")
-                lines.append("Security mistakes are expensive. Think before coding.")
+                lines.append("Mistakes here are expensive:")
+                lines.append("  • Security bugs = data breaches")
+                lines.append("  • Wrong architecture = complete rewrite")
+                lines.append("  • Bad patterns = technical debt forever")
+                lines.append("Think before coding. Fixes cost 2-10x later.")
                 lines.append("")
                 lines.append("🛑" * 20)
                 has_content = True
@@ -916,7 +923,7 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
                     lines.append("Also consider:")
                     lines.append("  • impact_analyze: What breaks if this fails?")
                     lines.append("")
-                lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+                lines.append("Critical files need thought. Bugs here cost days to fix.")
                 lines.append("")
                 lines.append("⚠️" * 15)
                 has_content = True
