@@ -1,0 +1,966 @@
+"""
+Mini Claude Handlers - Request processing logic
+
+This module contains all the handler functions that process tool calls.
+Each handler:
+1. Validates inputs
+2. Delegates work to the appropriate tool class
+3. Returns a MiniClaudeResponse
+
+Keeping handlers separate from server.py keeps the routing layer thin
+and makes it easier to add new tools.
+"""
+
+import asyncio
+from mcp.types import TextContent
+
+from .llm import LLMClient
+from .schema import MiniClaudeResponse, WorkLog
+from .tools import (
+    SearchEngine,
+    MemoryStore,
+    FileSummarizer,
+    DependencyMapper,
+    ConventionTracker,
+    ImpactAnalyzer,
+    SessionManager,
+    WorkTracker,
+)
+from .tools.code_quality import CodeQualityChecker
+from .tools.loop_detector import LoopDetector
+from .tools.scope_guard import ScopeGuard
+from .tools.context_guard import ContextGuard
+from .tools.output_validator import OutputValidator
+
+
+class Handlers:
+    """
+    Central handler class for all Mini Claude tool calls.
+
+    Initialized once with all tool instances, then handles
+    requests by delegating to the appropriate tool.
+    """
+
+    def __init__(self):
+        """Initialize all tool instances."""
+        self.llm = LLMClient()
+        self.search_engine = SearchEngine(self.llm)
+        self.memory = MemoryStore()
+        self.summarizer = FileSummarizer(self.llm)
+        self.dependency_mapper = DependencyMapper(self.llm)
+        self.conventions = ConventionTracker()
+        self.impact_analyzer = ImpactAnalyzer(self.llm)
+        self.session_manager = SessionManager(self.memory, self.conventions)
+        self.work_tracker = WorkTracker(self.memory)
+        self.code_quality = CodeQualityChecker()
+        self.loop_detector = LoopDetector()
+        self.scope_guard = ScopeGuard()
+        self.context_guard = ContextGuard()
+        self.output_validator = OutputValidator()
+
+        # Track session state to remind Claude to use tools properly
+        self._active_sessions: set[str] = set()  # project paths with active sessions
+        self._tool_call_count = 0  # how many tool calls since session_start
+
+    def _check_session(self, project_path: str | None) -> str | None:
+        """
+        Check if session_start was called for this project.
+        Returns a warning message if not, None if OK.
+        """
+        self._tool_call_count += 1
+
+        if not project_path:
+            return None
+
+        # Normalize path for comparison
+        normalized = project_path.rstrip("/")
+
+        if normalized not in self._active_sessions:
+            return (
+                f"⚠️ REMINDER: You haven't called session_start for this project yet! "
+                f"Call session_start(project_path='{project_path}') first to load "
+                f"memories and conventions. You've made {self._tool_call_count} tool "
+                f"calls without starting a session."
+            )
+
+    # -------------------------------------------------------------------------
+    # Status
+    # -------------------------------------------------------------------------
+
+    async def status(self) -> list[TextContent]:
+        """Check Mini Claude's health status."""
+        health = self.llm.health_check()
+        stats = self.memory.get_stats()
+
+        if health["healthy"]:
+            # Build suggestions - always nudge to use session_start first
+            suggestions = [
+                "**IMPORTANT**: Call session_start first to load project context!",
+                "Use impact_analyze before editing shared files",
+                "Use memory_remember to store what you learn",
+            ]
+
+            response = MiniClaudeResponse(
+                status="success",
+                confidence="high",
+                reasoning="Mini Claude is ready. Did you call session_start yet?",
+                work_log=WorkLog(what_worked=[
+                    "LLM connection verified",
+                    f"Model '{self.llm.model}' is available",
+                    f"Memory tracking {stats['projects_tracked']} projects",
+                ]),
+                data={
+                    "model": self.llm.model,
+                    "memory_stats": stats,
+                },
+                suggestions=suggestions,
+                warnings=["Remember: session_start loads memories + conventions in one call"],
+            )
+        else:
+            response = MiniClaudeResponse(
+                status="failed",
+                confidence="high",
+                reasoning=health.get("error", "Unknown error"),
+                work_log=WorkLog(what_failed=[health.get("error", "Health check failed")]),
+                suggestions=[health.get("suggestion", "Check Ollama installation")],
+                warnings=["Mini Claude cannot function without a working Ollama connection"],
+            )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Scout - Search
+    # -------------------------------------------------------------------------
+
+    async def search(self, query: str, directory: str, max_results: int) -> list[TextContent]:
+        """Handle search requests."""
+        # Validate inputs
+        if not query:
+            return self._needs_clarification("No query provided", "What would you like me to search for?")
+
+        if not directory:
+            return self._needs_clarification("No directory provided", "Which directory should I search in?")
+
+        # Check if session was started
+        session_warning = self._check_session(directory)
+
+        # Run search in thread pool to not block
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.search_engine.search(query, directory, max_results)
+        )
+
+        # Log to memory
+        if response.findings:
+            self.memory.log_search(
+                directory,
+                query,
+                len(response.findings),
+                [f.file for f in response.findings],
+            )
+
+        # Add session warning to output if needed
+        output = response.to_formatted_string()
+        if session_warning:
+            output = f"{session_warning}\n\n---\n\n{output}"
+
+        return [TextContent(type="text", text=output)]
+
+    # -------------------------------------------------------------------------
+    # Scout - Analyze
+    # -------------------------------------------------------------------------
+
+    async def analyze(self, code: str, question: str) -> list[TextContent]:
+        """Handle code analysis requests."""
+        if not code:
+            return self._needs_clarification("No code provided", "What code would you like me to analyze?")
+
+        if not question:
+            return self._needs_clarification("No question provided", "What would you like to know about this code?")
+
+        # Analyze using LLM
+        result = self.llm.analyze_code(code, question)
+
+        work_log = WorkLog(
+            what_i_tried=["LLM analysis"],
+            time_taken_ms=result.get("time_taken_ms", 0),
+        )
+
+        if result.get("success"):
+            work_log.what_worked.append("Analysis complete")
+            response = MiniClaudeResponse(
+                status="success",
+                confidence="medium",
+                reasoning=result["response"],
+                work_log=work_log,
+            )
+        else:
+            work_log.what_failed.append(result.get("error", "Unknown error"))
+            response = MiniClaudeResponse(
+                status="failed",
+                confidence="high",
+                reasoning=f"Analysis failed: {result.get('error')}",
+                work_log=work_log,
+                suggestions=["Check if Ollama is running", "Try simplifying the question"],
+            )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Memory - Remember
+    # -------------------------------------------------------------------------
+
+    async def remember(
+        self,
+        content: str,
+        category: str,
+        project_path: str | None,
+        relevance: int,
+    ) -> list[TextContent]:
+        """Handle remember requests."""
+        if not content:
+            return self._needs_clarification("No content provided", "What would you like me to remember?")
+
+        work_log = WorkLog()
+        work_log.what_i_tried.append(f"Storing {category} memory")
+
+        try:
+            self._store_memory(content, category, project_path, relevance)
+            work_log.what_worked.append("Memory stored")
+
+            response = MiniClaudeResponse(
+                status="success",
+                confidence="high",
+                reasoning=f"Remembered: {content[:100]}{'...' if len(content) > 100 else ''}",
+                work_log=work_log,
+                data={"category": category, "relevance": relevance},
+            )
+        except Exception as e:
+            work_log.what_failed.append(str(e))
+            response = MiniClaudeResponse(
+                status="failed",
+                confidence="high",
+                reasoning=f"Failed to store memory: {e}",
+                work_log=work_log,
+            )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    def _store_memory(self, content: str, category: str, project_path: str | None, relevance: int):
+        """Store memory based on category. Extracted for clarity."""
+        if category == "priority":
+            self.memory.add_priority(content, project_path, relevance)
+        elif category == "discovery":
+            if project_path:
+                self.memory.remember_discovery(project_path, content, relevance=relevance)
+            else:
+                self.memory.add_priority(content, relevance=relevance)
+        else:  # note
+            if project_path:
+                self.memory.remember_discovery(project_path, content, relevance=relevance)
+            else:
+                self.memory.add_priority(content, relevance=relevance)
+
+    # -------------------------------------------------------------------------
+    # Memory - Recall
+    # -------------------------------------------------------------------------
+
+    async def recall(self, project_path: str | None) -> list[TextContent]:
+        """Handle recall requests."""
+        work_log = WorkLog()
+        work_log.what_i_tried.append("Retrieving memories")
+
+        try:
+            memories = self.memory.recall(project_path=project_path)
+            work_log.what_worked.append("Memories retrieved")
+
+            response = MiniClaudeResponse(
+                status="success",
+                confidence="high",
+                reasoning="Here's what I remember",
+                work_log=work_log,
+                data=memories,
+            )
+        except Exception as e:
+            work_log.what_failed.append(str(e))
+            response = MiniClaudeResponse(
+                status="failed",
+                confidence="high",
+                reasoning=f"Failed to recall memories: {e}",
+                work_log=work_log,
+            )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Memory - Forget
+    # -------------------------------------------------------------------------
+
+    async def forget(self, project_path: str) -> list[TextContent]:
+        """Handle forget requests."""
+        if not project_path:
+            return self._needs_clarification("No project path provided", "Which project should I forget?")
+
+        work_log = WorkLog()
+        work_log.what_i_tried.append(f"Forgetting project: {project_path}")
+
+        try:
+            self.memory.forget_project(project_path)
+            work_log.what_worked.append("Project memories cleared")
+
+            response = MiniClaudeResponse(
+                status="success",
+                confidence="high",
+                reasoning=f"Forgot all memories for: {project_path}",
+                work_log=work_log,
+            )
+        except Exception as e:
+            work_log.what_failed.append(str(e))
+            response = MiniClaudeResponse(
+                status="failed",
+                confidence="high",
+                reasoning=f"Failed to forget: {e}",
+                work_log=work_log,
+            )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # File Summarizer
+    # -------------------------------------------------------------------------
+
+    async def summarize(self, file_path: str, mode: str) -> list[TextContent]:
+        """Handle file summarize requests."""
+        if not file_path:
+            return self._needs_clarification("No file path provided", "Which file should I summarize?")
+
+        # Run summarizer in thread pool
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.summarizer.summarize(file_path, mode)
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Dependency Mapper
+    # -------------------------------------------------------------------------
+
+    async def deps_map(
+        self,
+        file_path: str,
+        project_root: str | None,
+        include_reverse: bool,
+    ) -> list[TextContent]:
+        """Handle dependency mapping requests."""
+        if not file_path:
+            return self._needs_clarification(
+                "No file path provided",
+                "Which file should I analyze dependencies for?"
+            )
+
+        # Run mapper in thread pool
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.dependency_mapper.map_file(file_path, project_root, include_reverse)
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Session Manager
+    # -------------------------------------------------------------------------
+
+    async def session_start(self, project_path: str) -> list[TextContent]:
+        """Handle session start requests."""
+        response = self.session_manager.start_session(project_path)
+
+        # Register this session as active
+        if project_path:
+            self._active_sessions.add(project_path.rstrip("/"))
+            self._tool_call_count = 0  # Reset counter
+            # Start work tracking for this project
+            self.work_tracker.start_session(project_path)
+            # Create session marker for hooks to detect
+            try:
+                from pathlib import Path
+                marker = Path("/tmp/mini_claude_session_active")
+                marker.write_text(project_path)
+            except Exception:
+                pass  # Non-critical
+
+            # Notify remind hook that session was started - resets warning counters
+            try:
+                from .hooks.remind import mark_session_started
+                mark_session_started(project_path)
+            except Exception:
+                pass  # Non-critical if hooks aren't available
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Impact Analyzer
+    # -------------------------------------------------------------------------
+
+    async def impact_analyze(
+        self,
+        file_path: str,
+        project_root: str,
+        proposed_changes: str | None,
+    ) -> list[TextContent]:
+        """Handle impact analysis requests."""
+        if not file_path:
+            return self._needs_clarification(
+                "No file path provided",
+                "Which file do you want to analyze for change impact?"
+            )
+
+        if not project_root:
+            return self._needs_clarification(
+                "No project root provided",
+                "What is the project root directory?"
+            )
+
+        # Check if session was started
+        session_warning = self._check_session(project_root)
+
+        # Run analyzer in thread pool
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.impact_analyzer.analyze(file_path, project_root, proposed_changes)
+        )
+
+        output = response.to_formatted_string()
+        if session_warning:
+            output = f"{session_warning}\n\n---\n\n{output}"
+
+        return [TextContent(type="text", text=output)]
+
+    # -------------------------------------------------------------------------
+    # Convention Tracker
+    # -------------------------------------------------------------------------
+
+    async def convention_add(
+        self,
+        project_path: str,
+        rule: str,
+        category: str,
+        examples: list[str] | None,
+        reason: str | None,
+        importance: int,
+    ) -> list[TextContent]:
+        """Handle convention add requests."""
+        # Check session - but don't block convention adds
+        session_warning = self._check_session(project_path)
+
+        response = self.conventions.add_convention(
+            project_path=project_path,
+            rule=rule,
+            category=category,
+            examples=examples,
+            reason=reason,
+            importance=importance,
+        )
+
+        output = response.to_formatted_string()
+        if session_warning:
+            output = f"{session_warning}\n\n---\n\n{output}"
+
+        return [TextContent(type="text", text=output)]
+
+    async def convention_get(
+        self,
+        project_path: str,
+        category: str | None,
+    ) -> list[TextContent]:
+        """Handle convention get requests."""
+        # Check session
+        session_warning = self._check_session(project_path)
+
+        response = self.conventions.get_conventions(
+            project_path=project_path,
+            category=category,
+        )
+
+        output = response.to_formatted_string()
+        if session_warning:
+            output = f"{session_warning}\n\n---\n\n{output}"
+
+        return [TextContent(type="text", text=output)]
+
+    async def convention_check(
+        self,
+        project_path: str,
+        code_or_filename: str,
+    ) -> list[TextContent]:
+        """Handle convention check requests."""
+        # Check session
+        session_warning = self._check_session(project_path)
+
+        response = self.conventions.check_conventions(
+            project_path=project_path,
+            code_or_filename=code_or_filename,
+        )
+
+        output = response.to_formatted_string()
+        if session_warning:
+            output = f"{session_warning}\n\n---\n\n{output}"
+
+        return [TextContent(type="text", text=output)]
+
+    # -------------------------------------------------------------------------
+    # Work Tracker
+    # -------------------------------------------------------------------------
+
+    async def work_log_mistake(
+        self,
+        description: str,
+        file_path: str | None,
+        how_to_avoid: str | None,
+    ) -> list[TextContent]:
+        """Log a mistake for future reference."""
+        if not description:
+            return self._needs_clarification(
+                "No description provided",
+                "What went wrong?"
+            )
+
+        self.work_tracker.log_mistake(description, file_path, how_to_avoid)
+
+        # Notify hook that mistake was logged
+        try:
+            from .hooks.remind import mark_mistake_logged
+            mark_mistake_logged()
+        except Exception:
+            pass
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning=f"Logged mistake: {description[:100]}",
+            work_log=WorkLog(what_worked=["Mistake saved to memory"]),
+            suggestions=["This will warn you if you're about to repeat this mistake"],
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def work_log_decision(
+        self,
+        decision: str,
+        reason: str,
+        alternatives: list[str] | None,
+    ) -> list[TextContent]:
+        """Log an important decision."""
+        if not decision or not reason:
+            return self._needs_clarification(
+                "Need both decision and reason",
+                "What was decided and why?"
+            )
+
+        self.work_tracker.log_decision(decision, reason, alternatives)
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning=f"Logged decision: {decision[:100]}",
+            work_log=WorkLog(what_worked=["Decision recorded"]),
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def work_session_summary(self) -> list[TextContent]:
+        """Get summary of current session work."""
+        response = self.work_tracker.get_session_summary()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def work_pre_edit_check(self, file_path: str) -> list[TextContent]:
+        """Check for relevant context before editing a file."""
+        if not file_path:
+            return self._needs_clarification(
+                "No file path provided",
+                "Which file are you about to edit?"
+            )
+
+        # Notify hook that pre-edit check was done
+        try:
+            from .hooks.remind import mark_pre_edit_check_done
+            mark_pre_edit_check_done(file_path)
+        except Exception:
+            pass
+
+        response = self.work_tracker.get_relevant_context(file_path)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def work_save_session(self) -> list[TextContent]:
+        """Save current session work as memories."""
+        response = self.work_tracker.persist_session_to_memory()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Code Quality Checker
+    # -------------------------------------------------------------------------
+
+    async def code_quality_check(
+        self,
+        code: str,
+        language: str,
+    ) -> list[TextContent]:
+        """Check code for structural quality issues."""
+        if not code:
+            return self._needs_clarification(
+                "No code provided",
+                "What code would you like me to check?"
+            )
+
+        response = self.code_quality.check(code, language)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Loop Detector
+    # -------------------------------------------------------------------------
+
+    async def loop_record_edit(
+        self,
+        file_path: str,
+        description: str,
+    ) -> list[TextContent]:
+        """Record that a file was edited."""
+        if not file_path:
+            return self._needs_clarification(
+                "No file path provided",
+                "Which file was edited?"
+            )
+
+        # Notify hook that edit was recorded
+        try:
+            from .hooks.remind import mark_loop_record_done
+            mark_loop_record_done(file_path)
+        except Exception:
+            pass
+
+        response = self.loop_detector.record_edit(file_path, description or "")
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def loop_check_before_edit(self, file_path: str) -> list[TextContent]:
+        """Check if editing a file might create a loop."""
+        if not file_path:
+            return self._needs_clarification(
+                "No file path provided",
+                "Which file are you about to edit?"
+            )
+
+        response = self.loop_detector.check_before_edit(file_path)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def loop_record_test(
+        self,
+        passed: bool,
+        error_message: str,
+    ) -> list[TextContent]:
+        """Record test results."""
+        self.loop_detector.record_test_result(passed, error_message or "")
+
+        # Notify hook that test was recorded
+        try:
+            from .hooks.remind import mark_test_recorded
+            mark_test_recorded()
+        except Exception:
+            pass
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning=f"Test result recorded: {'PASSED' if passed else 'FAILED'}",
+            work_log=WorkLog(what_worked=["Test result logged"]),
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def loop_status(self) -> list[TextContent]:
+        """Get loop detection status."""
+        response = self.loop_detector.get_status()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Scope Guard
+    # -------------------------------------------------------------------------
+
+    async def scope_declare(
+        self,
+        task_description: str,
+        in_scope_files: list[str],
+        in_scope_patterns: list[str] | None,
+        out_of_scope_files: list[str] | None,
+        reason: str,
+    ) -> list[TextContent]:
+        """Declare the scope for the current task."""
+        if not task_description:
+            return self._needs_clarification(
+                "No task description provided",
+                "What task are you working on?"
+            )
+
+        if not in_scope_files:
+            return self._needs_clarification(
+                "No files specified",
+                "Which files are you allowed to edit?"
+            )
+
+        # Notify hook that scope was declared
+        try:
+            from .hooks.remind import mark_scope_declared
+            mark_scope_declared()
+        except Exception:
+            pass
+
+        response = self.scope_guard.declare_scope(
+            task_description=task_description,
+            in_scope_files=in_scope_files,
+            in_scope_patterns=in_scope_patterns,
+            out_of_scope_files=out_of_scope_files,
+            reason=reason or "",
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def scope_check(self, file_path: str) -> list[TextContent]:
+        """Check if editing a file is within scope."""
+        if not file_path:
+            return self._needs_clarification(
+                "No file path provided",
+                "Which file do you want to check?"
+            )
+
+        response = self.scope_guard.check_file(file_path)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def scope_expand(
+        self,
+        files_to_add: list[str],
+        reason: str,
+    ) -> list[TextContent]:
+        """Expand the current scope."""
+        if not files_to_add:
+            return self._needs_clarification(
+                "No files provided",
+                "Which files do you want to add to scope?"
+            )
+
+        if not reason:
+            return self._needs_clarification(
+                "No reason provided",
+                "Why do you need to expand the scope?"
+            )
+
+        response = self.scope_guard.expand_scope(files_to_add, reason)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def scope_status(self) -> list[TextContent]:
+        """Get scope status."""
+        response = self.scope_guard.get_status()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def scope_clear(self) -> list[TextContent]:
+        """Clear the current scope."""
+        response = self.scope_guard.clear_scope()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Context Guard - Checkpoints & Task Continuity
+    # -------------------------------------------------------------------------
+
+    async def context_checkpoint_save(
+        self,
+        task_description: str,
+        current_step: str,
+        completed_steps: list[str],
+        pending_steps: list[str],
+        files_involved: list[str],
+        key_decisions: list[str] | None,
+        blockers: list[str] | None,
+        project_path: str | None,
+    ) -> list[TextContent]:
+        """Save a checkpoint of current task state."""
+        if not task_description:
+            return self._needs_clarification(
+                "No task description",
+                "What task are you working on?"
+            )
+
+        response = self.context_guard.save_checkpoint(
+            task_description=task_description,
+            current_step=current_step or "",
+            completed_steps=completed_steps or [],
+            pending_steps=pending_steps or [],
+            files_involved=files_involved or [],
+            key_decisions=key_decisions,
+            blockers=blockers,
+            project_path=project_path,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_checkpoint_restore(
+        self,
+        task_id: str | None,
+    ) -> list[TextContent]:
+        """Restore task state from a checkpoint."""
+        response = self.context_guard.restore_checkpoint(task_id)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_checkpoint_list(self) -> list[TextContent]:
+        """List all saved checkpoints."""
+        response = self.context_guard.list_checkpoints()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_instruction_add(
+        self,
+        instruction: str,
+        reason: str,
+        importance: int,
+    ) -> list[TextContent]:
+        """Register a critical instruction that must not be forgotten."""
+        if not instruction:
+            return self._needs_clarification(
+                "No instruction provided",
+                "What instruction should never be forgotten?"
+            )
+
+        response = self.context_guard.add_critical_instruction(
+            instruction=instruction,
+            reason=reason or "Important rule",
+            importance=importance,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_instruction_reinforce(self) -> list[TextContent]:
+        """Get critical instructions that need reinforcement."""
+        response = self.context_guard.get_reinforcement()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_claim_completion(
+        self,
+        task: str,
+        evidence: list[str] | None,
+    ) -> list[TextContent]:
+        """Record a claim that a task is complete."""
+        if not task:
+            return self._needs_clarification(
+                "No task specified",
+                "What task are you claiming is complete?"
+            )
+
+        response = self.context_guard.claim_completion(task, evidence)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_self_check(
+        self,
+        task: str,
+        verification_steps: list[str],
+    ) -> list[TextContent]:
+        """Verify that claimed work was actually done."""
+        if not task:
+            return self._needs_clarification(
+                "No task specified",
+                "What task do you want to verify?"
+            )
+
+        if not verification_steps:
+            return self._needs_clarification(
+                "No verification steps",
+                "How should the task be verified?"
+            )
+
+        response = self.context_guard.self_check(task, verification_steps)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_handoff_create(
+        self,
+        summary: str,
+        next_steps: list[str],
+        context_needed: list[str],
+        warnings: list[str] | None,
+        project_path: str | None,
+    ) -> list[TextContent]:
+        """Create a structured handoff for the next session."""
+        if not summary:
+            return self._needs_clarification(
+                "No summary provided",
+                "What's the summary of what was done?"
+            )
+
+        if not next_steps:
+            return self._needs_clarification(
+                "No next steps provided",
+                "What should the next session work on?"
+            )
+
+        response = self.context_guard.create_handoff(
+            summary=summary,
+            next_steps=next_steps,
+            context_needed=context_needed or [],
+            warnings=warnings,
+            project_path=project_path,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def context_handoff_get(self) -> list[TextContent]:
+        """Retrieve the latest handoff document."""
+        response = self.context_guard.get_handoff()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Output Validator - Detect Silent Failures
+    # -------------------------------------------------------------------------
+
+    async def output_validate_code(
+        self,
+        code: str,
+        context: str | None,
+    ) -> list[TextContent]:
+        """Validate code for signs of fake output or silent failure."""
+        if not code:
+            return self._needs_clarification(
+                "No code provided",
+                "What code should I validate?"
+            )
+
+        response = self.output_validator.validate_code(code, context)
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def output_validate_result(
+        self,
+        output: str,
+        expected_format: str | None,
+        should_contain: list[str] | None,
+        should_not_contain: list[str] | None,
+    ) -> list[TextContent]:
+        """Validate command/function output for signs of fake results."""
+        if not output:
+            return self._needs_clarification(
+                "No output provided",
+                "What output should I validate?"
+            )
+
+        response = self.output_validator.validate_output(
+            output=output,
+            expected_format=expected_format,
+            should_contain=should_contain,
+            should_not_contain=should_not_contain,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Helper Methods
+    # -------------------------------------------------------------------------
+
+    def _needs_clarification(self, reasoning: str, question: str) -> list[TextContent]:
+        """Return a standard clarification response."""
+        response = MiniClaudeResponse(
+            status="needs_clarification",
+            confidence="high",
+            reasoning=reasoning,
+            questions=[question],
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
