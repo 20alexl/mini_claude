@@ -121,6 +121,113 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
         return None
 
 
+def create_hook_launcher_script():
+    """Create a hook launcher script that handles paths with spaces."""
+    script_dir = Path(__file__).parent.resolve()
+    hook_launcher = script_dir / "run_hook.sh"
+
+    # Create bash launcher for hooks
+    hook_content = '''#!/bin/bash
+# Mini Claude Hook launcher
+# This wrapper handles paths with spaces for the enforcement hooks
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/venv/bin/python" -m mini_claude.hooks.remind "$@"
+'''
+    try:
+        hook_launcher.write_text(hook_content)
+        hook_launcher.chmod(0o755)
+        return str(hook_launcher)
+    except Exception:
+        return None
+
+
+def get_hooks_config():
+    """Generate the hooks configuration for ~/.claude/settings.json."""
+    script_dir = Path(__file__).parent.resolve()
+    hook_launcher = script_dir / "run_hook.sh"
+
+    # Use the hook launcher script path
+    hook_cmd = str(hook_launcher)
+
+    return {
+        "hooks": {
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'"{hook_cmd}" prompt 2>/dev/null || echo ""',
+                            "timeout": 2000
+                        }
+                    ]
+                }
+            ],
+            "PreToolUse": [
+                {
+                    "matcher": "Edit|Write",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'"{hook_cmd}" edit "$TOOL_INPUT_FILE_PATH" 2>/dev/null || echo ""',
+                            "timeout": 1000
+                        }
+                    ]
+                }
+            ],
+            "PostToolUse": [
+                {
+                    "matcher": "Bash",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": f'"{hook_cmd}" bash "$TOOL_INPUT_COMMAND" "$TOOL_EXIT_CODE" 2>/dev/null || echo ""',
+                            "timeout": 1000
+                        }
+                    ]
+                },
+                {
+                    "matcher": "Edit|Write",
+                    "hooks": [
+                        {
+                            "type": "command",
+                            "command": 'echo \'<mini-claude-post-edit>Remember: loop_record_edit(file_path="$TOOL_INPUT_FILE_PATH", description="...") to track this change</mini-claude-post-edit>\'',
+                            "timeout": 500
+                        }
+                    ]
+                }
+            ]
+        }
+    }
+
+
+def install_hooks_config():
+    """Install hooks configuration to ~/.claude/settings.json."""
+    settings_file = Path.home() / ".claude" / "settings.json"
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load existing settings or create new
+    existing = {}
+    if settings_file.exists():
+        try:
+            existing = json.loads(settings_file.read_text())
+        except Exception:
+            pass
+
+    # Get new hooks config
+    hooks_config = get_hooks_config()
+
+    # Merge - hooks config overwrites existing hooks
+    existing["hooks"] = hooks_config["hooks"]
+
+    try:
+        settings_file.write_text(json.dumps(existing, indent=2))
+        return True, str(settings_file)
+    except Exception as e:
+        return False, str(e)
+
+
 def get_mcp_config():
     """Generate the .mcp.json configuration."""
     script_dir = Path(__file__).parent.resolve()
@@ -229,7 +336,7 @@ def main():
     print("\nMini Claude gives Claude Code persistent memory and")
     print("self-awareness tools to help avoid repeating mistakes.")
 
-    total_steps = 5
+    total_steps = 6
     script_dir = Path(__file__).parent.resolve()
 
     # Step 1: Check virtual environment
@@ -278,16 +385,30 @@ def main():
     memory_dir = create_memory_dir()
     print_success(f"Memory directory: {memory_dir}")
 
-    # Step 4b: Create launcher script
-    print("  Creating launcher script...")
+    # Step 4b: Create launcher scripts
+    print("  Creating launcher scripts...")
     launcher = create_launcher_script()
     if launcher:
-        print_success(f"Launcher: {launcher}")
+        print_success(f"Server launcher: {launcher}")
     else:
-        print_warning("Could not create launcher script")
+        print_warning("Could not create server launcher script")
 
-    # Step 5: Create .mcp.json in this directory
-    print_step(5, total_steps, "Creating MCP configuration...")
+    hook_launcher = create_hook_launcher_script()
+    if hook_launcher:
+        print_success(f"Hook launcher: {hook_launcher}")
+    else:
+        print_warning("Could not create hook launcher script")
+
+    # Step 5: Install hooks to ~/.claude/settings.json
+    print_step(5, total_steps, "Installing enforcement hooks...")
+    success, result = install_hooks_config()
+    if success:
+        print_success(f"Hooks installed: {result}")
+    else:
+        print_error(f"Failed to install hooks: {result}")
+
+    # Step 6: Create .mcp.json in this directory
+    print_step(6, total_steps, "Creating MCP configuration...")
     success, result = create_project_mcp_config(script_dir)
     if success:
         print_success(f"Created {result}")
