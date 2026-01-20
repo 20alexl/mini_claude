@@ -94,7 +94,7 @@ class Thinker:
         reasoning_prompt = self._build_research_prompt(question, context, findings, depth)
 
         try:
-            reasoning = self.llm.query(reasoning_prompt)
+            reasoning = self.llm.generate(reasoning_prompt)
             findings.append("\n## Analysis")
             findings.append(reasoning)
             work_log.what_worked.append("Generated reasoning with LLM")
@@ -171,7 +171,7 @@ Then provide a recommendation based on the context.
 Format as clear markdown with headers."""
 
         try:
-            comparison = self.llm.query(prompt)
+            comparison = self.llm.generate(prompt)
             work_log.what_worked.append("Generated comparison with LLM")
         except Exception as e:
             work_log.what_failed.append(f"LLM comparison failed: {str(e)}")
@@ -224,7 +224,7 @@ Be direct and critical. Point out if this seems like premature optimization,
 over-engineering, or tunnel vision."""
 
         try:
-            challenge = self.llm.query(prompt)
+            challenge = self.llm.generate(prompt)
             work_log.what_worked.append("Generated challenge with LLM")
         except Exception as e:
             work_log.what_failed.append(f"LLM challenge failed: {str(e)}")
@@ -283,7 +283,7 @@ For each approach:
 Don't just pick one - show the solution space."""
 
         try:
-            exploration = self.llm.query(prompt)
+            exploration = self.llm.generate(prompt)
             work_log.what_worked.append("Generated exploration with LLM")
         except Exception as e:
             work_log.what_failed.append(f"LLM exploration failed: {str(e)}")
@@ -377,7 +377,7 @@ Focus on:
 Be specific and practical."""
 
         try:
-            synthesis = self.llm.query(synthesis_prompt)
+            synthesis = self.llm.generate(synthesis_prompt)
             findings.append("\n## Synthesis")
             findings.append(synthesis)
             work_log.what_worked.append("Synthesized best practices")

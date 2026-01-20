@@ -138,7 +138,7 @@ mcp__mini-claude__scope_declare(
 
 If Claude tries to edit other files, it gets a warning.
 
-## All 38 Tools
+## All 52 Tools
 
 ### Session & Memory
 | Tool | What It Does |
@@ -205,6 +205,32 @@ If Claude tries to edit other files, it gets a warning.
 | `convention_add` | Store a coding rule |
 | `convention_get` | Get project rules |
 | `convention_check` | Check code against rules |
+
+### Testing & Git
+| Tool | What It Does |
+|------|--------------|
+| `test_run` | Auto-detect and run tests |
+| `test_can_claim_completion` | Check if tests allow completion |
+| `git_generate_commit_message` | Generate commit from work logs |
+| `git_auto_commit` | Auto-commit with context |
+
+### Momentum Tracking
+| Tool | What It Does |
+|------|--------------|
+| `momentum_start_task` | Start tracking multi-step task |
+| `momentum_complete_step` | Mark step complete |
+| `momentum_check` | Check if momentum maintained |
+| `momentum_finish_task` | Mark task complete |
+| `momentum_status` | Get momentum status |
+
+### Thinking Partner (NEW!)
+| Tool | What It Does |
+|------|--------------|
+| `think_research` | Deep research (web + codebase + LLM) |
+| `think_compare` | Compare options with pros/cons |
+| `think_challenge` | Challenge assumptions (devil's advocate) |
+| `think_explore` | Explore solution space |
+| `think_best_practice` | Find current best practices (2026) |
 
 ### Status
 | Tool | What It Does |

@@ -111,7 +111,7 @@ Runs locally with Ollama + `qwen2.5-coder:7b`.
 
 ---
 
-## All 38 Tools
+## All 52 Tools
 
 ### Session & Memory (USE THESE!)
 - `session_start` - **START HERE** every session
@@ -168,6 +168,26 @@ Runs locally with Ollama + `qwen2.5-coder:7b`.
 - `convention_add` - Store a rule
 - `convention_get` - Get rules
 - `convention_check` - Check code against rules
+
+### Testing & Git (AUTO-RUN TESTS, SMART COMMITS)
+- `test_run` - Auto-detect and run tests (pytest, npm, go, rust, make)
+- `test_can_claim_completion` - Check if tests allow completion claim
+- `git_generate_commit_message` - Generate commit message from work logs + decisions
+- `git_auto_commit` - Auto-commit with context-aware message
+
+### Momentum Tracking (PREVENT STOPPING MID-TASK)
+- `momentum_start_task` - Start tracking multi-step task
+- `momentum_complete_step` - Mark step as complete
+- `momentum_check` - Check if momentum is maintained
+- `momentum_finish_task` - Mark task as finished
+- `momentum_status` - Get current momentum status
+
+### Thinking Partner (OVERCOME TUNNEL VISION!)
+- `think_research` - Deep research (web + codebase + LLM reasoning)
+- `think_compare` - Compare multiple approaches with pros/cons
+- `think_challenge` - Challenge assumptions (devil's advocate)
+- `think_explore` - Explore solution space (simple → ideal)
+- `think_best_practice` - Find current (2026) best practices
 
 ### Status
 - `mini_claude_status` - Health check
