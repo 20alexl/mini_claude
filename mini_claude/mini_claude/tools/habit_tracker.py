@@ -183,6 +183,26 @@ class HabitTracker:
         lines.append("📊 Your Habits (last 7 days):")
         lines.append("")
 
+        # Check if this is first-time use (no data yet)
+        total_activity = (stats["thinker_used"] + stats["risky_without_thinking"] +
+                         stats["loops_avoided"] + stats["loops_hit"])
+
+        if total_activity == 0:
+            lines.append("🌱 Just getting started!")
+            lines.append("")
+            lines.append("Mini Claude will track your habits as you work:")
+            lines.append("  • Using Thinker tools before risky work")
+            lines.append("  • Avoiding death spiral loops")
+            lines.append("  • Building good coding practices")
+            lines.append("")
+            lines.append("💡 Quick Start:")
+            lines.append("  1. On your next architectural task, try think_explore")
+            lines.append("  2. When editing auth/security files, use think_best_practice")
+            lines.append("  3. If you edit the same file 3+ times, check think_challenge")
+            lines.append("")
+            lines.append("Check back in a few days to see your progress!")
+            return "\n".join(lines)
+
         # Thinking before risky work
         think_rate = stats["think_rate"]
         if think_rate >= 80:
