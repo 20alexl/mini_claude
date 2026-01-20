@@ -1261,16 +1261,18 @@ class Handlers:
         )
 
         # Get work summary
-        work_summary = await loop.run_in_executor(
+        work_summary_response = await loop.run_in_executor(
             None,
             lambda: self.work_tracker.get_session_summary()
         )
+        work_summary = work_summary_response.data if work_summary_response.data else {}
 
         # Get context handoff if exists
-        handoff = await loop.run_in_executor(
+        handoff_response = await loop.run_in_executor(
             None,
             lambda: self.context_guard.get_handoff()
         )
+        handoff = handoff_response.data if handoff_response.data else {}
 
         # Build comprehensive summary
         lines = []
