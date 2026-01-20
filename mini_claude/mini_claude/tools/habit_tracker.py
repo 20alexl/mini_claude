@@ -230,6 +230,37 @@ class HabitTracker:
         elif stats["loops_hit"] > 0:
             lines.append(f"⚠️  Hit {stats['loops_hit']} loop(s). When stuck, step back and think!")
 
+        lines.append("")
+
+        # Show which specific Thinker tools were used
+        data = self._load_habits()
+        cutoff = datetime.now() - timedelta(days=7)
+        recent_thinker_events = [
+            e for e in data["events"]
+            if e["event_type"] == "thinker_used" and
+            datetime.fromisoformat(e["timestamp"]) > cutoff
+        ]
+
+        if recent_thinker_events:
+            # Count tool usage
+            tool_counts = {}
+            for event in recent_thinker_events:
+                tool = event.get("tool_used", "unknown")
+                tool_counts[tool] = tool_counts.get(tool, 0) + 1
+
+            lines.append("🧠 Thinker Tools Used:")
+            for tool, count in sorted(tool_counts.items(), key=lambda x: x[1], reverse=True):
+                lines.append(f"  • {tool}: {count}x")
+            lines.append("")
+        elif stats["risky_without_thinking"] > 0:
+            # No Thinker tools used but risky work done
+            lines.append("💡 Thinker Tools You Should Try:")
+            lines.append("  • think_best_practice: Check 2026 standards before implementing")
+            lines.append("  • think_explore: See all options before choosing")
+            lines.append("  • think_compare: Weigh pros/cons of approaches")
+            lines.append("  • think_challenge: Question your assumptions")
+            lines.append("")
+
         return "\n".join(lines)
 
     def suggest_tool_for_context(self, context: str, risk_reason: str = "") -> Tuple[str, str]:

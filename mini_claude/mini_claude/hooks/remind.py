@@ -386,40 +386,79 @@ def check_loop_detected(file_path: str = "") -> tuple[bool, int]:
     return (False, 0)
 
 
-def check_risky_file(file_path: str) -> tuple[bool, str]:
+def check_risky_file(file_path: str) -> tuple[bool, str, int]:
     """
     Check if file is high-risk (core infrastructure).
 
     Returns:
-        (is_risky, reason)
+        (is_risky, reason, tier_level)
+        tier_level: 1 = warn, 2 = strong warn, 3 = BLOCK
     """
     if not file_path:
-        return (False, "")
+        return (False, "", 0)
 
     filename = Path(file_path).name.lower()
     parent = Path(file_path).parent.name.lower()
 
-    # High-risk file patterns
-    risky_patterns = {
+    # Tier 3: BLOCKING - Security-critical files (must use Thinker)
+    tier3_patterns = {
         "auth": "authentication/authorization",
         "login": "authentication",
         "password": "security-sensitive",
+        "security": "security-critical",
+        "payment": "payment processing",
+        "billing": "billing logic",
+    }
+
+    for pattern, reason in tier3_patterns.items():
+        if pattern in filename or pattern in parent:
+            return (True, reason, 3)
+
+    # Tier 2: Strong warning - Important files (should use Thinker)
+    tier2_patterns = {
         "config": "configuration",
         "settings": "configuration",
         "database": "data layer",
         "db": "data layer",
         "migration": "database schema",
         "schema": "database schema",
-        "security": "security-critical",
-        "payment": "payment processing",
-        "billing": "billing logic",
     }
 
-    for pattern, reason in risky_patterns.items():
+    for pattern, reason in tier2_patterns.items():
         if pattern in filename or pattern in parent:
-            return (True, reason)
+            return (True, reason, 2)
 
-    return (False, "")
+    return (False, "", 0)
+
+
+def check_recent_thinker_usage(minutes: int = 5) -> tuple[bool, str]:
+    """
+    Check if any Thinker tool was used recently.
+
+    Returns:
+        (used_recently, last_tool_used)
+    """
+    try:
+        from ..tools.habit_tracker import get_recent_thinker_usage
+
+        # Check if any Thinker tool was used in last N minutes
+        recent = get_recent_thinker_usage("", limit=10)
+        if recent:
+            import time
+            from datetime import datetime
+
+            for event in recent:
+                timestamp = datetime.fromisoformat(event["timestamp"])
+                age_seconds = time.time() - timestamp.timestamp()
+
+                if age_seconds < (minutes * 60):
+                    tool = event.get("tool_used", "unknown")
+                    return (True, tool)
+
+        return (False, "")
+    except Exception:
+        # If habit tracker not available, assume not used
+        return (False, "")
 
 
 # ============================================================================
@@ -810,35 +849,77 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
         lines.append("🛑" * 15)
         has_content = True
 
-    # TIER 2 ENFORCEMENT: Strong warnings for risky files with SMART SUGGESTIONS
+    # TIER 2/3 ENFORCEMENT: Warnings or BLOCKING for risky files
     if file_path:
-        is_risky, risk_reason = check_risky_file(file_path)
+        is_risky, risk_reason, tier = check_risky_file(file_path)
         if is_risky:
             # Get smart tool suggestion
             suggested_tool, tool_reason = suggest_tool_for_context(file_path, risk_reason)
 
-            # Record that risky edit is happening without thinking (will track habit)
-            record_risky_edit_without_thinking(file_path, risk_reason)
+            # Check if Thinker was used recently
+            used_thinker, last_tool = check_recent_thinker_usage(minutes=5)
 
-            lines.append("⚠️" * 15)
-            lines.append("")
-            lines.append(f"HIGH-RISK FILE: {risk_reason}")
-            lines.append("")
-            lines.append(f"Editing {Path(file_path).name} requires careful thought:")
-            lines.append("  - Changes here affect critical functionality")
-            lines.append("  - Bugs here have high impact")
-            lines.append("  - Security/data integrity at stake")
-            lines.append("")
-            lines.append(f"⚠️ RECOMMENDED: Start with {suggested_tool}")
-            lines.append(f"   WHY: {tool_reason}")
-            lines.append("")
-            lines.append("Also consider:")
-            lines.append("  • impact_analyze: What breaks if this fails?")
-            lines.append("")
-            lines.append("Quality over speed. Mistakes cost 2x to fix later.")
-            lines.append("")
-            lines.append("⚠️" * 15)
-            has_content = True
+            # TIER 3: BLOCK security files without Thinker
+            if tier == 3 and not used_thinker:
+                # Record that risky edit is happening without thinking
+                record_risky_edit_without_thinking(file_path, risk_reason)
+
+                lines.append("🛑" * 20)
+                lines.append("")
+                lines.append(f"🛑 BLOCKED: SECURITY-CRITICAL FILE - {risk_reason}")
+                lines.append("")
+                lines.append(f"You are about to edit {Path(file_path).name} without using Thinker tools.")
+                lines.append("")
+                lines.append("This file is security-critical. Bugs here can:")
+                lines.append("  • Expose sensitive data")
+                lines.append("  • Create authentication bypasses")
+                lines.append("  • Enable privilege escalation")
+                lines.append("  • Compromise user accounts")
+                lines.append("")
+                lines.append("🛑 REQUIRED: Use a Thinker tool FIRST")
+                lines.append("")
+                lines.append(f"RECOMMENDED: {suggested_tool}")
+                lines.append(f"WHY: {tool_reason}")
+                lines.append("")
+                lines.append("Other options:")
+                lines.append("  • think_best_practice: Check 2026 security standards")
+                lines.append("  • think_research: Research secure implementation patterns")
+                lines.append("  • think_compare: Compare security approaches")
+                lines.append("")
+                lines.append("Security mistakes are expensive. Think before coding.")
+                lines.append("")
+                lines.append("🛑" * 20)
+                has_content = True
+
+            # TIER 2: Strong warning for important files
+            elif tier >= 2:
+                # Record that risky edit is happening (maybe without thinking)
+                if not used_thinker:
+                    record_risky_edit_without_thinking(file_path, risk_reason)
+
+                lines.append("⚠️" * 15)
+                lines.append("")
+                if used_thinker:
+                    lines.append(f"HIGH-RISK FILE: {risk_reason} (Thinker used: {last_tool} ✓)")
+                else:
+                    lines.append(f"HIGH-RISK FILE: {risk_reason}")
+                lines.append("")
+                lines.append(f"Editing {Path(file_path).name} requires careful thought:")
+                lines.append("  - Changes here affect critical functionality")
+                lines.append("  - Bugs here have high impact")
+                lines.append("  - Security/data integrity at stake")
+                lines.append("")
+                if not used_thinker:
+                    lines.append(f"⚠️ RECOMMENDED: Start with {suggested_tool}")
+                    lines.append(f"   WHY: {tool_reason}")
+                    lines.append("")
+                    lines.append("Also consider:")
+                    lines.append("  • impact_analyze: What breaks if this fails?")
+                    lines.append("")
+                lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+                lines.append("")
+                lines.append("⚠️" * 15)
+                has_content = True
 
     # ENFORCE: Session must be active
     if not session_active:

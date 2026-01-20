@@ -63,6 +63,74 @@ class MiniClaudeResponse(BaseModel):
         """Convert response to a readable format for Claude."""
         lines = []
 
+        # SPECIAL CASE: Test failures need prominent display
+        is_test_failure = (
+            self.status == "failed" and
+            isinstance(self.data, dict) and
+            self.data.get("passed") is False
+        )
+
+        if is_test_failure:
+            lines.append("=" * 60)
+            lines.append("❌ TEST FAILURES DETECTED")
+            lines.append("=" * 60)
+            lines.append("")
+
+            # Show failure count
+            failures = self.data.get("failures", [])
+            if failures:
+                lines.append(f"**Failed tests ({len(failures)}):**")
+                for failure in failures[:10]:  # Show first 10
+                    lines.append(f"  • {failure}")
+                lines.append("")
+
+            # Show full output prominently
+            full_output = self.data.get("full_output", "")
+            if full_output:
+                lines.append("**Test Output:**")
+                lines.append("```")
+                lines.append(full_output[:3000])  # Show more for test failures
+                if len(full_output) > 3000:
+                    lines.append("...")
+                    lines.append(f"(truncated - {len(full_output)} chars total)")
+                lines.append("```")
+                lines.append("")
+
+            # Show exit code
+            exit_code = self.data.get("exit_code", "unknown")
+            lines.append(f"**Exit code:** {exit_code}")
+            lines.append("")
+
+            # Warnings are CRITICAL for test failures
+            if self.warnings:
+                lines.append("🛑 **CRITICAL WARNINGS:**")
+                for w in self.warnings:
+                    lines.append(f"  • {w}")
+                lines.append("")
+
+            # Suggestions for fixing
+            if self.suggestions:
+                lines.append("**What to do next:**")
+                for s in self.suggestions:
+                    lines.append(f"  • {s}")
+                lines.append("")
+
+            lines.append("=" * 60)
+            lines.append("")
+
+            # Skip normal data display - we already showed it
+            # Continue with work log below
+            lines.append("### Work Log")
+            lines.append(f"- Files examined: {self.work_log.files_examined}")
+            lines.append(f"- Time taken: {self.work_log.time_taken_ms}ms")
+            if self.work_log.what_i_tried:
+                lines.append(f"- Tried: {', '.join(self.work_log.what_i_tried)}")
+            if self.work_log.what_failed:
+                lines.append(f"- Failed: {', '.join(self.work_log.what_failed)}")
+
+            return "\n".join(lines)
+
+        # NORMAL CASE: Standard formatting
         # Status and confidence
         lines.append(f"## Mini Claude Report")
         lines.append(f"**Status:** {self.status} | **Confidence:** {self.confidence}")
