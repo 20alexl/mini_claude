@@ -27,15 +27,25 @@ ollama pull qwen2.5-coder:7b
 git clone https://github.com/20alexl/mini_claude.git
 cd mini_claude
 
-# 4. Run the installer
+# 4. Create virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or: venv\Scripts\activate  # Windows
+
+# 5. Install the package
+pip install -e mini_claude/
+
+# 6. Run the installer
 python install.py
 ```
 
 The installer will:
-- Create a Python virtual environment
-- Install all dependencies
+- Create launcher scripts
 - Generate a global MCP configuration
+- Set up hooks
 - Show you how to use it
+
+**Note:** The `venv` directory must stay! VSCode runs Mini Claude from `venv/bin/python`. Don't delete it or move the repo after installation.
 
 ## Setup for Your Projects
 
@@ -411,6 +421,26 @@ With it:
 - Hooks are fast (< 100ms)
 - LLM calls are cached
 - Most tools don't use the LLM at all
+
+### Do I need to keep the venv folder?
+
+**Yes!** The venv must stay where you installed it. Here's why:
+
+- VSCode runs Mini Claude from `venv/bin/python`
+- The MCP configuration points to this path
+- If you move/delete the venv, Mini Claude stops working
+
+**What you CAN do:**
+- Use Mini Claude from multiple projects (it's global)
+- Copy CLAUDE.md to different repos
+- Have different memories per project
+
+**What you CAN'T do:**
+- Move the mini_claude repo after installation
+- Delete the venv folder
+- Rename the venv folder
+
+If you need to reinstall, just run `python install.py` again.
 
 ## Contributing
 
