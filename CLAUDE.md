@@ -1,5 +1,7 @@
 # Mini Claude - Project Instructions
 
+**NOTE:** This file is for Claude Code (the AI). Copy it to your project root so Claude knows how to use Mini Claude tools effectively.
+
 ## STOP. READ THIS FIRST.
 
 You have a junior dev (Mini Claude) who remembers things across sessions. **USE HIM.**
@@ -111,7 +113,7 @@ Runs locally with Ollama + `qwen2.5-coder:7b`.
 
 ---
 
-## All 52 Tools
+## All 55 Tools
 
 ### Session & Memory (USE THESE!)
 - `session_start` - **START HERE** every session
@@ -188,6 +190,11 @@ Runs locally with Ollama + `qwen2.5-coder:7b`.
 - `think_challenge` - Challenge assumptions (devil's advocate)
 - `think_explore` - Explore solution space (simple → ideal)
 - `think_best_practice` - Find current (2026) best practices
+
+### Habit Tracker (BUILD GOOD HABITS!)
+- `habit_get_stats` - View habit statistics (last 7 days)
+- `habit_get_feedback` - Get gamified feedback on your habits
+- `habit_session_summary` - **Call before ending session** - Creates comprehensive handoff
 
 ### Status
 - `mini_claude_status` - Health check
