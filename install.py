@@ -100,11 +100,44 @@ def create_memory_dir():
     return str(memory_dir)
 
 
+def create_launcher_script():
+    """Create a launcher script that handles paths with spaces."""
+    script_dir = Path(__file__).parent.resolve()
+    launcher = script_dir / "run_server.sh"
+
+    # Create bash launcher for Linux/Mac
+    launcher_content = '''#!/bin/bash
+# Mini Claude MCP Server launcher
+# This wrapper handles paths with spaces
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+"${SCRIPT_DIR}/venv/bin/python" -m mini_claude.server "$@"
+'''
+    try:
+        launcher.write_text(launcher_content)
+        launcher.chmod(0o755)
+        return str(launcher)
+    except Exception:
+        return None
+
+
 def get_mcp_config():
     """Generate the .mcp.json configuration."""
     script_dir = Path(__file__).parent.resolve()
 
-    # Find the Python executable - prefer venv
+    # Use launcher script (handles paths with spaces better)
+    launcher = script_dir / "run_server.sh"
+    if launcher.exists():
+        return {
+            "mcpServers": {
+                "mini-claude": {
+                    "command": str(launcher),
+                    "args": []
+                }
+            }
+        }
+
+    # Fallback to direct python path
     venv_python = script_dir / "venv" / "bin" / "python"
     if not venv_python.exists():
         venv_python = script_dir / "venv" / "Scripts" / "python.exe"  # Windows
@@ -244,6 +277,14 @@ def main():
     print_step(4, total_steps, "Creating memory directory...")
     memory_dir = create_memory_dir()
     print_success(f"Memory directory: {memory_dir}")
+
+    # Step 4b: Create launcher script
+    print("  Creating launcher script...")
+    launcher = create_launcher_script()
+    if launcher:
+        print_success(f"Launcher: {launcher}")
+    else:
+        print_warning("Could not create launcher script")
 
     # Step 5: Create .mcp.json in this directory
     print_step(5, total_steps, "Creating MCP configuration...")
