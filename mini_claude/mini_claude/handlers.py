@@ -25,6 +25,10 @@ from .tools import (
     ImpactAnalyzer,
     SessionManager,
     WorkTracker,
+    TestRunner,
+    GitHelper,
+    MomentumTracker,
+    Thinker,
 )
 from .tools.code_quality import CodeQualityChecker
 from .tools.loop_detector import LoopDetector
@@ -57,6 +61,10 @@ class Handlers:
         self.scope_guard = ScopeGuard()
         self.context_guard = ContextGuard()
         self.output_validator = OutputValidator()
+        self.test_runner = TestRunner()
+        self.git_helper = GitHelper(self.memory, self.work_tracker)
+        self.momentum_tracker = MomentumTracker()
+        self.thinker = Thinker(self.memory, self.search_engine, self.llm)
 
         # Track session state to remind Claude to use tools properly
         self._active_sessions: set[str] = set()  # project paths with active sessions
@@ -948,6 +956,246 @@ class Handlers:
             expected_format=expected_format,
             should_contain=should_contain,
             should_not_contain=should_not_contain,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Test Runner - Auto test execution
+    # -------------------------------------------------------------------------
+
+    async def test_run(
+        self,
+        project_dir: str,
+        test_command: str | None,
+        timeout: int,
+    ) -> list[TextContent]:
+        """Run tests and return results."""
+        if not project_dir:
+            return self._needs_clarification(
+                "No project directory provided",
+                "Which project should I run tests in?"
+            )
+
+        # Run in thread pool to not block
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.test_runner.run_tests(project_dir, test_command, timeout)
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def test_can_claim_completion(self) -> list[TextContent]:
+        """Check if completion can be claimed based on test results."""
+        can_claim, reason = self.test_runner.can_claim_completion()
+
+        if can_claim:
+            response = MiniClaudeResponse(
+                status="success",
+                confidence="high",
+                reasoning=reason,
+                work_log=WorkLog(what_worked=["Tests passing consistently"]),
+                suggestions=["Safe to claim completion"],
+            )
+        else:
+            response = MiniClaudeResponse(
+                status="failed",
+                confidence="high",
+                reasoning=reason,
+                work_log=WorkLog(what_failed=["Cannot claim completion yet"]),
+                warnings=["Fix issues before claiming done"],
+                suggestions=["Run tests again after fixes", "Check test output"],
+            )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Git Helper - Commit message generation
+    # -------------------------------------------------------------------------
+
+    async def git_generate_commit_message(
+        self,
+        project_dir: str,
+    ) -> list[TextContent]:
+        """Generate commit message from work logs and changes."""
+        if not project_dir:
+            return self._needs_clarification(
+                "No project directory provided",
+                "Which project should I generate commit message for?"
+            )
+
+        # Get session summary from work tracker
+        summary_response = self.work_tracker.get_session_summary()
+        session_data = summary_response.data if hasattr(summary_response, 'data') else None
+
+        # Run in thread pool
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.git_helper.generate_commit_message(project_dir, session_data)
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def git_auto_commit(
+        self,
+        project_dir: str,
+        message: str | None,
+        files: list[str] | None,
+    ) -> list[TextContent]:
+        """Auto-commit with generated message."""
+        if not project_dir:
+            return self._needs_clarification(
+                "No project directory provided",
+                "Which project should I commit to?"
+            )
+
+        # Run in thread pool
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.git_helper.auto_commit(project_dir, message, files)
+        )
+
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Momentum Tracker - Prevent stopping mid-task
+    # -------------------------------------------------------------------------
+
+    async def momentum_start_task(
+        self,
+        task_description: str,
+        expected_steps: list[str],
+    ) -> list[TextContent]:
+        """Start tracking a multi-step task."""
+        self.momentum_tracker.start_task(task_description, expected_steps)
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning=f"Started tracking task with {len(expected_steps)} steps",
+            work_log=WorkLog(what_worked=[f"Tracking: {task_description}"]),
+            data={
+                "task": task_description,
+                "steps": expected_steps,
+            },
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def momentum_complete_step(self, step: str) -> list[TextContent]:
+        """Mark a step as completed."""
+        self.momentum_tracker.complete_step(step)
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning=f"Marked step complete: {step}",
+            work_log=WorkLog(what_worked=[step]),
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def momentum_check(self) -> list[TextContent]:
+        """Check if momentum is being maintained."""
+        response = self.momentum_tracker.check_momentum()
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def momentum_finish_task(self) -> list[TextContent]:
+        """Mark current task as finished."""
+        self.momentum_tracker.finish_task()
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning="Task completed and removed from stack",
+            work_log=WorkLog(what_worked=["Task finished"]),
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def momentum_status(self) -> list[TextContent]:
+        """Get current momentum tracking status."""
+        status = self.momentum_tracker.get_status()
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning="Current momentum status",
+            work_log=WorkLog(),
+            data=status,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Thinker - Research and reasoning partner
+    # -------------------------------------------------------------------------
+
+    async def think_research(
+        self,
+        question: str,
+        context: str | None,
+        depth: str,
+        project_path: str | None,
+    ) -> list[TextContent]:
+        """Deep research on a question using web + codebase + reasoning."""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.thinker.research(question, context, depth, project_path)
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def think_compare(
+        self,
+        options: list[str],
+        context: str,
+        criteria: list[str] | None,
+    ) -> list[TextContent]:
+        """Compare multiple approaches with pros/cons analysis."""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.thinker.compare(options, context, criteria)
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def think_challenge(
+        self,
+        assumption: str,
+        context: str | None,
+    ) -> list[TextContent]:
+        """Challenge an assumption with devil's advocate reasoning."""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.thinker.challenge(assumption, context)
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def think_explore(
+        self,
+        problem: str,
+        constraints: list[str] | None,
+        project_path: str | None,
+    ) -> list[TextContent]:
+        """Broad exploration of solution space for a problem."""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.thinker.explore(problem, constraints, project_path)
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def think_best_practice(
+        self,
+        topic: str,
+        language_or_framework: str | None,
+        year: int,
+    ) -> list[TextContent]:
+        """Find current best practices for a topic."""
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(
+            None,
+            lambda: self.thinker.best_practice(topic, language_or_framework, year)
         )
         return [TextContent(type="text", text=response.to_formatted_string())]
 

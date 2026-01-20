@@ -3,11 +3,20 @@ LLM Client for Mini Claude
 
 Handles communication with the local Ollama instance.
 Includes retry logic and health checking.
+
+Environment variables:
+- MINI_CLAUDE_MODEL: Which Ollama model to use (default: qwen2.5-coder:7b)
+- MINI_CLAUDE_OLLAMA_URL: Ollama API URL (default: http://localhost:11434)
 """
 
 import httpx
+import os
 import time
 from typing import Optional
+
+
+# Default model - can be overridden via environment variable
+DEFAULT_MODEL = "qwen2.5-coder:7b"
 
 
 class LLMClient:
@@ -15,13 +24,14 @@ class LLMClient:
 
     def __init__(
         self,
-        base_url: str = "http://localhost:11434",
-        model: str = "qwen2.5-coder:7b",
+        base_url: str = None,
+        model: str = None,
         timeout: float = 120.0,
         max_retries: int = 3,
     ):
-        self.base_url = base_url
-        self.model = model
+        # Allow environment variables to override defaults
+        self.base_url = base_url or os.environ.get("MINI_CLAUDE_OLLAMA_URL", "http://localhost:11434")
+        self.model = model or os.environ.get("MINI_CLAUDE_MODEL", DEFAULT_MODEL)
         self.timeout = timeout
         self.max_retries = max_retries
         self._client = httpx.Client(timeout=timeout)

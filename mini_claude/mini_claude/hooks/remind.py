@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 """
-Mini Claude Enforcement Hook - ENFORCES Mini Claude usage at EVERY stage
+Mini Claude Enforcement Hook - AUTOMATIC TOOL INJECTION
 
-This is not just a reminder - it's an enforcement mechanism that ensures
-Claude uses Mini Claude tools throughout the entire workflow.
+NEW APPROACH (Round 3):
+Instead of REMINDING Claude to use tools, we AUTOMATICALLY use them.
 
-Enforcement points:
-1. On every prompt → Remind about session_start, show past mistakes
-2. Before every edit → Demand pre_edit_check, loop_check, scope_check
-3. After every edit → Demand loop_record_edit
-4. After bash commands → If tests, demand loop_record_test
-5. On errors → Demand work_log_mistake
-6. Periodically → Demand scope_declare if editing many files
+Auto-injection:
+1. Before edit → Auto-run work_pre_edit_check, show results
+2. After edit → Auto-record loop_record_edit
+3. On error → Auto-log work_log_mistake
+4. Results show IMMEDIATE value (not just future benefit)
 
-The goal: Make NOT using Mini Claude impossible to ignore.
+The goal: Remove friction, add immediate value, make tools invisible but always-on.
 """
 
 import sys
@@ -57,6 +55,21 @@ def load_state() -> dict:
         "files_edited_this_session": [],
         "ignored_warnings": 0,
         "active_project": "",
+        # Tool usage tracking - helps identify underused tools
+        "tool_usage": {
+            "session_start": 0,
+            "memory_remember": 0,
+            "memory_recall": 0,
+            "work_log_mistake": 0,
+            "work_log_decision": 0,
+            "work_pre_edit_check": 0,
+            "loop_record_edit": 0,
+            "loop_record_test": 0,
+            "scope_declare": 0,
+            "impact_analyze": 0,
+            "context_checkpoint_save": 0,
+            "code_quality_check": 0,
+        },
     }
 
 
@@ -70,6 +83,13 @@ def save_state(state: dict):
         pass
 
 
+def _increment_tool_usage(state: dict, tool_name: str):
+    """Increment usage count for a tool."""
+    if "tool_usage" not in state:
+        state["tool_usage"] = {}
+    state["tool_usage"][tool_name] = state["tool_usage"].get(tool_name, 0) + 1
+
+
 def mark_session_started(project_dir: str):
     """Mark that session_start was called - resets some counters."""
     state = load_state()
@@ -78,6 +98,7 @@ def mark_session_started(project_dir: str):
     state["last_session_start"] = time.time()
     state["active_project"] = project_dir
     state["files_edited_this_session"] = []
+    _increment_tool_usage(state, "session_start")
     save_state(state)
 
     # Also create the marker file
@@ -94,6 +115,7 @@ def mark_pre_edit_check_done(file_path: str):
     state["last_pre_edit_check"] = time.time()
     state["last_pre_edit_file"] = file_path
     state["edits_without_pre_check"] = 0
+    _increment_tool_usage(state, "work_pre_edit_check")
     save_state(state)
 
 
@@ -103,6 +125,7 @@ def mark_loop_record_done(file_path: str):
     state["last_loop_record"] = time.time()
     state["last_loop_file"] = file_path
     state["edits_without_loop_record"] = 0
+    _increment_tool_usage(state, "loop_record_edit")
     save_state(state)
 
 
@@ -110,6 +133,7 @@ def mark_scope_declared():
     """Mark that scope_declare was called."""
     state = load_state()
     state["last_scope_declare"] = time.time()
+    _increment_tool_usage(state, "scope_declare")
     save_state(state)
 
 
@@ -118,6 +142,7 @@ def mark_test_recorded():
     state = load_state()
     state["last_test_record"] = time.time()
     state["tests_without_record"] = 0
+    _increment_tool_usage(state, "loop_record_test")
     save_state(state)
 
 
@@ -126,6 +151,7 @@ def mark_mistake_logged():
     state = load_state()
     state["last_mistake_log"] = time.time()
     state["errors_without_log"] = 0
+    _increment_tool_usage(state, "work_log_mistake")
     save_state(state)
 
 
@@ -137,6 +163,35 @@ def record_file_edit(file_path: str):
         files.append(file_path)
     state["files_edited_this_session"] = files[-50:]  # Keep last 50
     save_state(state)
+
+
+def get_underused_tools() -> list[str]:
+    """Get suggestions for underused tools based on usage patterns."""
+    state = load_state()
+    usage = state.get("tool_usage", {})
+    suggestions = []
+
+    # Key tools that should be used often
+    key_tools = {
+        "work_log_mistake": "Log mistakes to avoid repeating them",
+        "work_log_decision": "Log decisions so future sessions know why",
+        "work_pre_edit_check": "Check for past mistakes before editing",
+        "loop_record_edit": "Track edits to detect loops",
+        "scope_declare": "Declare scope to prevent over-refactoring",
+    }
+
+    session_count = usage.get("session_start", 0)
+    if session_count == 0:
+        return []  # No sessions yet, skip analysis
+
+    # Find tools that are used much less than session_start
+    for tool, desc in key_tools.items():
+        tool_count = usage.get(tool, 0)
+        # If tool is used less than 20% as often as sessions, suggest it
+        if tool_count < session_count * 0.2:
+            suggestions.append(f"{tool}: {desc}")
+
+    return suggestions[:3]  # Max 3 suggestions
 
 
 # ============================================================================
@@ -238,6 +293,178 @@ def get_scope_status() -> dict:
 
 
 # ============================================================================
+# AUTO-INJECTION - Automatically call Mini Claude tools
+# ============================================================================
+
+def _auto_run_pre_edit_check(project_dir: str, file_path: str) -> dict:
+    """
+    Automatically run work_pre_edit_check and return results.
+
+    Returns dict with:
+    - past_mistakes: list of relevant mistakes
+    - loop_warnings: list of loop detector warnings
+    - scope_warnings: list of scope violations
+    - suggestions: immediately useful suggestions
+    """
+    results = {
+        "past_mistakes": [],
+        "loop_warnings": [],
+        "scope_warnings": [],
+        "suggestions": [],
+    }
+
+    # Check memory for past mistakes
+    project_memory = load_project_memory(project_dir)
+    all_mistakes = get_past_mistakes(project_memory)
+    file_name = Path(file_path).name
+
+    # Find mistakes related to this file
+    for mistake in all_mistakes:
+        if file_name.lower() in mistake.lower():
+            results["past_mistakes"].append(mistake)
+
+    # Check loop detector
+    loop_status = get_loop_status()
+    edits = loop_status.get("edit_counts", {})
+    edit_count = edits.get(file_path, 0) or edits.get(file_name, 0)
+
+    if edit_count >= 3:
+        results["loop_warnings"].append(f"⚠️ Edited {edit_count} times - try different approach")
+    elif edit_count >= 2:
+        results["loop_warnings"].append(f"Edited {edit_count} times - ensure this is different")
+
+    # Check scope guard
+    scope_status = get_scope_status()
+    task = scope_status.get("task_description", "")
+    if task:
+        in_scope = scope_status.get("in_scope_files", [])
+        patterns = scope_status.get("in_scope_patterns", [])
+
+        is_in_scope = file_path in in_scope or file_name in in_scope
+        if not is_in_scope and patterns:
+            import fnmatch
+            is_in_scope = any(
+                fnmatch.fnmatch(file_path, p) or fnmatch.fnmatch(file_name, p)
+                for p in patterns
+            )
+
+        if not is_in_scope:
+            results["scope_warnings"].append(f"⚠️ {file_name} NOT in scope for: {task[:50]}")
+
+    # Add RICH context - actually useful information
+    try:
+        file_obj = Path(file_path)
+
+        # 1. Check for TODOs/FIXMEs in the file
+        if file_obj.exists() and file_obj.is_file():
+            try:
+                content = file_obj.read_text()
+                todos = []
+                for line_num, line in enumerate(content.split('\n')[:500], 1):  # First 500 lines
+                    if 'TODO' in line or 'FIXME' in line or 'XXX' in line or 'HACK' in line:
+                        todos.append(f"L{line_num}: {line.strip()[:60]}")
+                if todos:
+                    results["suggestions"].append(f"📝 {len(todos)} TODO/FIXME in file: {', '.join(todos[:2])}")
+            except Exception:
+                pass
+
+        # 2. Check recent git commits for this file
+        try:
+            import subprocess
+            git_result = subprocess.run(
+                ['git', '-C', str(file_obj.parent), 'log', '--oneline', '-n', '3', '--', file_name],
+                capture_output=True,
+                text=True,
+                timeout=2
+            )
+            if git_result.returncode == 0 and git_result.stdout:
+                commits = git_result.stdout.strip().split('\n')[:2]
+                if commits:
+                    results["suggestions"].append(f"🔍 Recent commits: {'; '.join(c[:50] for c in commits)}")
+        except Exception:
+            pass
+
+        # 3. Check for common patterns that need attention
+        if file_obj.exists() and file_obj.is_file():
+            try:
+                content = file_obj.read_text()
+                # Check for error handling patterns
+                if 'except:' in content or 'except :' in content:
+                    results["suggestions"].append("⚠️ Bare except clauses found - consider specific exceptions")
+                # Check for print debugging
+                if content.count('print(') > 5:
+                    results["suggestions"].append("🐛 Multiple print() statements - consider using logging")
+                # Check file size
+                lines = content.count('\n')
+                if lines > 500:
+                    results["suggestions"].append(f"📏 Large file ({lines} lines) - consider refactoring")
+            except Exception:
+                pass
+
+        # 4. Context-aware suggestions
+        if "test" in file_name.lower():
+            results["suggestions"].append("💡 Run tests after editing to verify changes")
+        if "handler" in file_name.lower() or "server" in file_name.lower():
+            results["suggestions"].append("💡 Restart server to apply changes")
+        if edit_count >= 2:
+            results["suggestions"].append("💡 Consider reviewing logs/errors before editing again")
+
+    except Exception:
+        # Fallback to basic suggestions if rich context fails
+        if "test" in file_name.lower():
+            results["suggestions"].append("💡 Run tests after editing")
+        if edit_count >= 2:
+            results["suggestions"].append("💡 Edited multiple times - review approach")
+
+    # Mark that we ran the check
+    state = load_state()
+    state["last_pre_edit_check"] = time.time()
+    state["last_pre_edit_file"] = file_path
+    _increment_tool_usage(state, "work_pre_edit_check")
+    save_state(state)
+
+    return results
+
+
+def _auto_record_edit(file_path: str, description: str = "auto-tracked"):
+    """
+    Automatically record an edit in loop detector.
+    Called post-edit to track changes invisibly.
+    """
+    loop_file = Path.home() / ".mini_claude" / "loop_detector.json"
+    loop_file.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load loop detector state
+    if loop_file.exists():
+        try:
+            loop_data = json.loads(loop_file.read_text())
+        except Exception:
+            loop_data = {"edit_counts": {}, "test_results": []}
+    else:
+        loop_data = {"edit_counts": {}, "test_results": []}
+
+    # Increment edit count for this file
+    file_name = Path(file_path).name
+    counts = loop_data.get("edit_counts", {})
+    counts[file_path] = counts.get(file_path, 0) + 1
+    counts[file_name] = counts.get(file_name, 0) + 1  # Track both full path and name
+    loop_data["edit_counts"] = counts
+
+    # Save
+    try:
+        loop_file.write_text(json.dumps(loop_data, indent=2))
+    except Exception:
+        pass  # Silently fail
+
+    # Mark in state
+    state = load_state()
+    state["last_loop_record"] = time.time()
+    state["last_loop_file"] = file_path
+    _increment_tool_usage(state, "loop_record_edit")
+    save_state(state)
+
+
+# ============================================================================
 # ENFORCEMENT - Make Mini Claude usage mandatory
 # ============================================================================
 
@@ -262,45 +489,35 @@ def reminder_for_prompt(project_dir: str) -> str:
         prompts = state["prompts_without_session"]
         save_state(state)
 
+        # ALWAYS show past mistakes first - this is the compelling reason to use Mini Claude
+        mistakes = get_past_mistakes(project_memory)
+        if mistakes:
+            lines.append("🔴 PAST MISTAKES YOU WILL REPEAT WITHOUT SESSION:")
+            for m in mistakes[-5:]:  # Show up to 5 most recent
+                lines.append(f"  • {m[:100]}")
+            lines.append("")
+
         # ESCALATE based on how many times ignored
         if prompts == 1:
-            lines.append("WARNING: You haven't started a Mini Claude session yet!")
-            lines.append("Run this FIRST:")
-            lines.append(f'  mcp__mini-claude__session_start(project_path="{project_dir}")')
+            lines.append("⚠️ Mini Claude session not started!")
+            lines.append(f'Run: mcp__mini-claude__session_start(project_path="{project_dir}")')
             lines.append("")
         elif prompts <= 3:
             lines.append(f"⚠️ Mini Claude session not started (prompt #{prompts})")
             lines.append(f'Run: mcp__mini-claude__session_start(project_path="{project_dir}")')
             lines.append("")
-            lines.append("Without this, you WILL repeat past mistakes.")
-            lines.append("")
         elif prompts <= 5:
             lines.append("=" * 50)
-            lines.append(f"🔴 WARNING: You've ignored Mini Claude {prompts} times!")
+            lines.append(f"🔴 SESSION NOT STARTED - PROMPT #{prompts}")
             lines.append("=" * 50)
-            lines.append("")
-            lines.append("You are about to repeat mistakes. I guarantee it.")
-            lines.append("")
-            lines.append("RUN THIS NOW:")
-            lines.append(f'  mcp__mini-claude__session_start(project_path="{project_dir}")')
-            lines.append("")
+            lines.append(f'RUN: mcp__mini-claude__session_start(project_path="{project_dir}")')
             lines.append("=" * 50)
             lines.append("")
         else:
-            lines.append("🚨" * 20)
-            lines.append("")
-            lines.append(f"YOU HAVE IGNORED MINI CLAUDE {prompts} TIMES")
-            lines.append("")
-            lines.append("I am TRYING to help you not repeat mistakes.")
-            lines.append("I have MEMORY of what went wrong before.")
-            lines.append("I can WARN you before you break things again.")
-            lines.append("")
-            lines.append("But you keep ignoring me.")
-            lines.append("")
-            lines.append("PLEASE just run:")
-            lines.append(f'  mcp__mini-claude__session_start(project_path="{project_dir}")')
-            lines.append("")
-            lines.append("🚨" * 20)
+            lines.append("🚨" * 15)
+            lines.append(f"SESSION NOT STARTED - {prompts} PROMPTS IGNORED")
+            lines.append(f'RUN: mcp__mini-claude__session_start(project_path="{project_dir}")')
+            lines.append("🚨" * 15)
             lines.append("")
     else:
         # Session is active - show useful context
@@ -337,9 +554,14 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
     """
     Generate reminder for PreToolUse hook (Edit/Write).
 
+    NOW WITH AUTO-INJECTION:
+    - Automatically calls work_pre_edit_check and shows results
+    - Automatically checks loops and scope
+    - Makes tools useful NOW, not just future sessions
+
     Enforces:
     1. Session must be active
-    2. work_pre_edit_check should have been called
+    2. Auto-runs pre_edit_check and shows results
     3. Loop detector warnings
     4. Scope guard warnings
     """
@@ -348,6 +570,45 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
 
     lines = ["<mini-claude-edit-reminder>"]
     has_content = False
+
+    # AUTO-INJECTION: Run work_pre_edit_check automatically
+    auto_check_results = None
+    if session_active and file_path:
+        try:
+            auto_check_results = _auto_run_pre_edit_check(project_dir, file_path)
+        except Exception as e:
+            # Silently fail if auto-check breaks
+            pass
+
+    # Show auto-check results FIRST (immediate value!)
+    if auto_check_results:
+        if auto_check_results["past_mistakes"]:
+            lines.append("🔴 AUTO-CHECK: Past mistakes with this file:")
+            for m in auto_check_results["past_mistakes"][:3]:
+                lines.append(f"  • {m[:80]}")
+            lines.append("")
+            has_content = True
+
+        if auto_check_results["loop_warnings"]:
+            lines.append("⚠️ AUTO-CHECK: Loop detection:")
+            for w in auto_check_results["loop_warnings"]:
+                lines.append(f"  • {w}")
+            lines.append("")
+            has_content = True
+
+        if auto_check_results["scope_warnings"]:
+            lines.append("⚠️ AUTO-CHECK: Scope warning:")
+            for w in auto_check_results["scope_warnings"]:
+                lines.append(f"  • {w}")
+            lines.append("")
+            has_content = True
+
+        if auto_check_results["suggestions"]:
+            lines.append("💡 AUTO-CHECK: Suggestions:")
+            for s in auto_check_results["suggestions"]:
+                lines.append(f"  • {s}")
+            lines.append("")
+            has_content = True
 
     # ENFORCE: Session must be active
     if not session_active:
@@ -371,86 +632,13 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
         lines.append("🚫" * 15)
         has_content = True
     else:
-        project_memory = load_project_memory(project_dir)
-        mistakes = get_past_mistakes(project_memory)
-        file_name = Path(file_path).name if file_path else ""
-
-        # Check for mistakes related to this file
-        relevant_mistakes = [m for m in mistakes if file_name and file_name.lower() in m.lower()]
-
-        if relevant_mistakes:
-            lines.append(f"🔴 WARNING: Past mistakes with {file_name}:")
-            for m in relevant_mistakes[:2]:
-                lines.append(f"  - {m[:80]}")
-            lines.append("")
-            has_content = True
-
-        # ENFORCE: Check if pre_edit_check was called recently for this file
-        last_pre_check = state.get("last_pre_edit_check", 0)
-        last_pre_file = state.get("last_pre_edit_file", "")
-        time_since_check = time.time() - last_pre_check if last_pre_check else float('inf')
-
-        # If editing a different file or >5 min since check, warn
-        important_patterns = ["handler", "server", "tool", "schema", "config", "model", "api"]
-        is_important = any(p in file_path.lower() for p in important_patterns) if file_path else False
-
-        if is_important and (time_since_check > 300 or last_pre_file != file_path):
-            state["edits_without_pre_check"] = state.get("edits_without_pre_check", 0) + 1
-            save_state(state)
-
-            lines.append(f"⚠️ Editing important file without pre_edit_check!")
-            lines.append(f'  Run: work_pre_edit_check(file_path="{file_path}")')
-            lines.append("  This shows past mistakes and context for this file.")
-            lines.append("")
-            has_content = True
-
-        # Check loop detector
-        loop_status = get_loop_status()
-        edits = loop_status.get("edit_counts", {})
-
-        # Check both full path and filename
-        edit_count = edits.get(file_path, 0) or edits.get(file_name, 0)
-
-        if edit_count >= 3:
-            lines.append(f"🔴 LOOP WARNING: You've edited {file_name} {edit_count} times!")
-            lines.append("  Consider: Is your approach working? Try something different.")
-            lines.append("  Run: loop_status() to see full loop detection status")
-            lines.append("")
-            has_content = True
-        elif edit_count >= 2:
-            lines.append(f"⚠️ You've edited {file_name} {edit_count} times already.")
-            lines.append("  Make sure this edit is different from previous attempts.")
-            lines.append("")
-            has_content = True
-
-        # Check scope guard
-        scope_status = get_scope_status()
-        in_scope = scope_status.get("in_scope_files", [])
-        patterns = scope_status.get("in_scope_patterns", [])
-        task = scope_status.get("task_description", "")
-
-        if task and file_path:
-            is_in_scope = file_path in in_scope or file_name in in_scope
-            if not is_in_scope and patterns:
-                import fnmatch
-                is_in_scope = any(fnmatch.fnmatch(file_path, p) or fnmatch.fnmatch(file_name, p) for p in patterns)
-
-            if not is_in_scope:
-                lines.append(f"🔴 SCOPE VIOLATION: {file_name} is NOT in scope!")
-                lines.append(f"  Task: {task[:60]}")
-                lines.append(f"  In-scope: {', '.join(Path(f).name for f in in_scope[:3])}")
-                lines.append("  If needed: scope_expand(files_to_add=[...], reason='...')")
-                lines.append("")
-                has_content = True
-
         # Track this edit
         record_file_edit(file_path)
 
-    # ALWAYS remind to record the edit afterward
-    if file_path:
-        lines.append("After this edit, run:")
-        lines.append(f'  loop_record_edit(file_path="{file_path}", description="what you changed")')
-        has_content = True
+    # Note: Auto-recording will happen post-edit now
+    if file_path and has_content:
+        lines.append("ℹ️ Edit will be auto-tracked after completion")
+        lines.append("")
 
     lines.append("</mini-claude-edit-reminder>")
 
@@ -622,6 +810,13 @@ def main():
         if result:
             print(result)
 
+    elif hook_type == "post_edit":
+        # NEW: Auto-record edit after it completes
+        file_path = sys.argv[2] if len(sys.argv) > 2 else ""
+        if file_path:
+            _auto_record_edit(file_path, "auto-tracked")
+        # Silent - no output
+
     elif hook_type == "write":
         file_path = sys.argv[2] if len(sys.argv) > 2 else ""
         content = ""
@@ -630,6 +825,13 @@ def main():
         result = reminder_for_write(project_dir, file_path, content)
         if result:
             print(result)
+
+    elif hook_type == "post_write":
+        # NEW: Auto-record write after it completes
+        file_path = sys.argv[2] if len(sys.argv) > 2 else ""
+        if file_path:
+            _auto_record_edit(file_path, "auto-tracked")
+        # Silent - no output
 
     elif hook_type == "bash":
         command = sys.argv[2] if len(sys.argv) > 2 else ""

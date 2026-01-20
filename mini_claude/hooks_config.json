@@ -36,11 +36,21 @@
         ]
       },
       {
-        "matcher": "Edit|Write",
+        "matcher": "Edit",
         "hooks": [
           {
             "type": "command",
-            "command": "echo '<mini-claude-post-edit>Remember: loop_record_edit(file_path=\"$TOOL_INPUT_FILE_PATH\", description=\"...\") to track this change</mini-claude-post-edit>'",
+            "command": "python3 -m mini_claude.hooks.remind post_edit \"$TOOL_INPUT_FILE_PATH\" 2>/dev/null || echo ''",
+            "timeout": 500
+          }
+        ]
+      },
+      {
+        "matcher": "Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -m mini_claude.hooks.remind post_write \"$TOOL_INPUT_FILE_PATH\" 2>/dev/null || echo ''",
             "timeout": 500
           }
         ]

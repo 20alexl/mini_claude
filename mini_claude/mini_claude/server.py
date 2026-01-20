@@ -270,6 +270,83 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 should_not_contain=arguments.get("should_not_contain"),
             )
 
+        case "test_run":
+            return await handlers.test_run(
+                project_dir=arguments.get("project_dir", ""),
+                test_command=arguments.get("test_command"),
+                timeout=arguments.get("timeout", 300),
+            )
+
+        case "test_can_claim_completion":
+            return await handlers.test_can_claim_completion()
+
+        case "git_generate_commit_message":
+            return await handlers.git_generate_commit_message(
+                project_dir=arguments.get("project_dir", ""),
+            )
+
+        case "git_auto_commit":
+            return await handlers.git_auto_commit(
+                project_dir=arguments.get("project_dir", ""),
+                message=arguments.get("message"),
+                files=arguments.get("files"),
+            )
+
+        case "momentum_start_task":
+            return await handlers.momentum_start_task(
+                task_description=arguments.get("task_description", ""),
+                expected_steps=arguments.get("expected_steps", []),
+            )
+
+        case "momentum_complete_step":
+            return await handlers.momentum_complete_step(
+                step=arguments.get("step", ""),
+            )
+
+        case "momentum_check":
+            return await handlers.momentum_check()
+
+        case "momentum_finish_task":
+            return await handlers.momentum_finish_task()
+
+        case "momentum_status":
+            return await handlers.momentum_status()
+
+        case "think_research":
+            return await handlers.think_research(
+                question=arguments.get("question", ""),
+                context=arguments.get("context"),
+                depth=arguments.get("depth", "medium"),
+                project_path=arguments.get("project_path"),
+            )
+
+        case "think_compare":
+            return await handlers.think_compare(
+                options=arguments.get("options", []),
+                context=arguments.get("context", ""),
+                criteria=arguments.get("criteria"),
+            )
+
+        case "think_challenge":
+            return await handlers.think_challenge(
+                assumption=arguments.get("assumption", ""),
+                context=arguments.get("context"),
+            )
+
+        case "think_explore":
+            return await handlers.think_explore(
+                problem=arguments.get("problem", ""),
+                constraints=arguments.get("constraints"),
+                project_path=arguments.get("project_path"),
+            )
+
+        case "think_best_practice":
+            return await handlers.think_best_practice(
+                topic=arguments.get("topic", ""),
+                language_or_framework=arguments.get("language_or_framework"),
+                year=arguments.get("year", 2026),
+            )
+
         case _:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 

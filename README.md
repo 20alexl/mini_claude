@@ -2,6 +2,8 @@
 
 A junior AI agent that gives Claude Code **persistent memory** and **mistake tracking** across all your projects.
 
+**Now with automatic tool injection!** Tools run automatically - no manual calls needed.
+
 ## The Problem
 
 Claude Code forgets everything between sessions:
@@ -239,8 +241,33 @@ If Claude tries to edit other files, it gets a warning.
 ## Requirements
 
 - Python 3.10+
-- [Ollama](https://ollama.ai) with `qwen2.5-coder:7b`
+- [Ollama](https://ollama.ai) with any coding model
 - Claude Code (VSCode extension)
+
+## Configuration
+
+### Choosing a Different Model
+
+By default, Mini Claude uses `qwen2.5-coder:7b`. You can use any Ollama model by setting environment variables:
+
+```bash
+# Use a different model
+export MINI_CLAUDE_MODEL="codellama:7b"
+
+# Or use a larger model for better results
+export MINI_CLAUDE_MODEL="qwen2.5-coder:14b"
+
+# Custom Ollama URL (if not localhost)
+export MINI_CLAUDE_OLLAMA_URL="http://192.168.1.100:11434"
+```
+
+**Recommended models:**
+- `qwen2.5-coder:7b` (default) - Good balance of speed and quality
+- `qwen2.5-coder:14b` - Better quality, slower
+- `codellama:7b` - Alternative coding model
+- `deepseek-coder:6.7b` - Another good option
+
+To make the change permanent, add the export to your shell profile (`~/.bashrc`, `~/.zshrc`, etc.).
 
 ## Troubleshooting
 

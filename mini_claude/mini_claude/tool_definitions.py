@@ -1152,4 +1152,407 @@ Use this to verify that outputs are real, not generated fakes.""",
             "required": ["output"],
         },
     ),
+
+    # -------------------------------------------------------------------------
+    # Test Runner - Run Tests
+    # -------------------------------------------------------------------------
+    Tool(
+        name="test_run",
+        description="""Run tests and return results.
+
+Auto-detects test commands for:
+- Python: pytest, unittest
+- Node.js: npm test
+- Go: go test
+- Rust: cargo test
+- Makefile: make test
+
+Prevents false completion claims by tracking test results.
+Use this to verify changes before claiming work is done.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_dir": {
+                    "type": "string",
+                    "description": "Project directory to run tests in"
+                },
+                "test_command": {
+                    "type": "string",
+                    "description": "Optional: explicit test command (auto-detect if omitted)"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "description": "Max time in seconds (default: 300)",
+                    "default": 300
+                },
+            },
+            "required": ["project_dir"],
+        },
+    ),
+
+    # -------------------------------------------------------------------------
+    # Test Runner - Can Claim Completion
+    # -------------------------------------------------------------------------
+    Tool(
+        name="test_can_claim_completion",
+        description="""Check if completion can be claimed based on test history.
+
+Returns whether tests are passing consistently.
+Detects flaky tests (passed now but failed recently).
+
+Use this before claiming a task is complete.""",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+
+    # -------------------------------------------------------------------------
+    # Git Helper - Generate Commit Message
+    # -------------------------------------------------------------------------
+    Tool(
+        name="git_generate_commit_message",
+        description="""Generate intelligent commit message from work context.
+
+Combines:
+1. Work logs (what was done)
+2. Decisions (why choices were made)
+3. Files changed (what was touched)
+4. Git diff (actual changes)
+
+Returns a structured commit message with:
+- Summary line (72 char limit)
+- Detailed changes from decisions
+- Fixes from mistakes logged
+- File change statistics
+- Co-authored-by tag for Claude
+
+Use this to create meaningful commit messages instead of generic ones.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_dir": {
+                    "type": "string",
+                    "description": "Project directory"
+                },
+            },
+            "required": ["project_dir"],
+        },
+    ),
+
+    # -------------------------------------------------------------------------
+    # Git Helper - Auto Commit
+    # -------------------------------------------------------------------------
+    Tool(
+        name="git_auto_commit",
+        description="""Automatically commit changes with generated or explicit message.
+
+If no message provided, generates one from work logs and changes.
+Handles git add and git commit automatically.
+
+Returns the commit hash and message.
+
+Use this to quickly commit work with context-aware messages.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_dir": {
+                    "type": "string",
+                    "description": "Project directory"
+                },
+                "message": {
+                    "type": "string",
+                    "description": "Optional: explicit commit message (generate if omitted)"
+                },
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional: specific files to commit (all if omitted)"
+                },
+            },
+            "required": ["project_dir"],
+        },
+    ),
+
+    # -------------------------------------------------------------------------
+    # Momentum Tracker - Prevent stopping mid-task
+    # -------------------------------------------------------------------------
+    Tool(
+        name="momentum_start_task",
+        description="""Start tracking a multi-step task to prevent stopping mid-task.
+
+Use this when beginning work that has multiple clear steps.
+Helps detect when you stop after step 1 instead of continuing to step 2.
+
+Example:
+  momentum_start_task(
+    task_description="Wire new tools into MCP server",
+    expected_steps=["Add to __init__.py", "Add handlers", "Add routing", "Add tool definitions"]
+  )
+
+The tracker will warn if you stop before completing all steps.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "task_description": {
+                    "type": "string",
+                    "description": "Description of the task"
+                },
+                "expected_steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of steps that should be completed"
+                },
+            },
+            "required": ["task_description", "expected_steps"],
+        },
+    ),
+
+    Tool(
+        name="momentum_complete_step",
+        description="""Mark a step as completed in the current task.
+
+Call this as you finish each step to track progress.""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "step": {
+                    "type": "string",
+                    "description": "The step that was completed"
+                },
+            },
+            "required": ["step"],
+        },
+    ),
+
+    Tool(
+        name="momentum_check",
+        description="""Check if momentum is being maintained.
+
+Returns warnings if:
+- Current task has pending steps
+- Too many reads without corresponding edits
+- Inactive for >30s with pending work
+
+Use this periodically to catch yourself stopping mid-task.""",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+
+    Tool(
+        name="momentum_finish_task",
+        description="""Mark the current task as finished.
+
+Call this when all steps are complete.""",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+
+    Tool(
+        name="momentum_status",
+        description="""Get current momentum tracking status.
+
+Shows:
+- Active task (if any)
+- Expected vs completed steps
+- Pending steps
+- Time since start and last action""",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+
+    # -------------------------------------------------------------------------
+    # Thinker - Research and reasoning partner
+    # -------------------------------------------------------------------------
+    Tool(
+        name="think_research",
+        description="""Deep research on a question using web + codebase + reasoning.
+
+Helps overcome tunnel vision by:
+- Searching current best practices (2026 docs)
+- Finding existing patterns in codebase
+- Using LLM to reason about findings
+- Suggesting next steps
+
+Use this BEFORE writing code to understand the problem space.
+
+Example:
+  think_research(
+    question="What's the best way to handle async file I/O in Python?",
+    context="Building an MCP server with high concurrency",
+    depth="medium"
+  )""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "question": {
+                    "type": "string",
+                    "description": "The question to research"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Optional context about why you're asking"
+                },
+                "depth": {
+                    "type": "string",
+                    "enum": ["quick", "medium", "deep"],
+                    "description": "How thorough to be (default: medium)",
+                    "default": "medium"
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional project to search for existing patterns"
+                },
+            },
+            "required": ["question"],
+        },
+    ),
+
+    Tool(
+        name="think_compare",
+        description="""Compare multiple approaches with pros/cons analysis.
+
+Prevents hasty decisions by evaluating trade-offs.
+
+Use this when you have multiple options and aren't sure which is best.
+
+Example:
+  think_compare(
+    options=["SQLite", "PostgreSQL", "DuckDB"],
+    context="Local-first MCP server with <100MB data",
+    criteria=["complexity", "performance", "features"]
+  )""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of options to compare"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Context for the decision"
+                },
+                "criteria": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional criteria to evaluate (default: complexity, performance, maintainability, ecosystem)"
+                },
+            },
+            "required": ["options", "context"],
+        },
+    ),
+
+    Tool(
+        name="think_challenge",
+        description="""Challenge an assumption with devil's advocate reasoning.
+
+Prevents over-engineering and premature optimization.
+
+Use this when you're about to make a strong assumption (e.g., "we need sub-1ms latency").
+
+Example:
+  think_challenge(
+    assumption="We need to cache everything in memory for speed",
+    context="Processing user queries in MCP server"
+  )""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "assumption": {
+                    "type": "string",
+                    "description": "The assumption to challenge"
+                },
+                "context": {
+                    "type": "string",
+                    "description": "Optional context about the assumption"
+                },
+            },
+            "required": ["assumption"],
+        },
+    ),
+
+    Tool(
+        name="think_explore",
+        description="""Broad exploration of solution space for a problem.
+
+Prevents tunnel vision by showing multiple approaches:
+- Simple/naive (quick to implement)
+- Standard (what most people do)
+- Creative (unusual but potentially better)
+- Ideal (if resources unlimited)
+
+Use this when starting a new feature to see all options.
+
+Example:
+  think_explore(
+    problem="Store conversation history across sessions",
+    constraints=["local-first", "under 10MB", "fast reads"]
+  )""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "problem": {
+                    "type": "string",
+                    "description": "The problem to solve"
+                },
+                "constraints": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Optional constraints"
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional project to check for existing patterns"
+                },
+            },
+            "required": ["problem"],
+        },
+    ),
+
+    Tool(
+        name="think_best_practice",
+        description="""Find current best practices for a topic.
+
+Ensures you're using 2026 best practices, not outdated patterns.
+
+Use this before implementing something you're not sure about.
+
+Example:
+  think_best_practice(
+    topic="error handling",
+    language_or_framework="Python asyncio",
+    year=2026
+  )""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "description": "What to find best practices for"
+                },
+                "language_or_framework": {
+                    "type": "string",
+                    "description": "Optional language/framework context"
+                },
+                "year": {
+                    "type": "integer",
+                    "description": "Year for recency (default: 2026)",
+                    "default": 2026
+                },
+            },
+            "required": ["topic"],
+        },
+    ),
 ]
