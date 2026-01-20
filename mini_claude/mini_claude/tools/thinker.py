@@ -105,10 +105,9 @@ class Thinker:
 
         # Step 4: Remember this research for future
         if project_path:
-            self.memory.remember(
-                content=f"Researched: {question}. Key finding: {findings[0] if findings else 'No findings'}",
-                category="discovery",
+            self.memory.remember_discovery(
                 project_path=project_path,
+                content=f"Researched: {question}. Key finding: {findings[0] if findings else 'No findings'}",
                 relevance=7,
             )
 
