@@ -17,7 +17,7 @@ from pathlib import Path
 
 import httpx
 
-from ..llm import LLM
+from ..llm import LLMClient
 from ..schema import MiniClaudeResponse, WorkLog
 from .scout import SearchEngine
 from .memory import MemoryStore
@@ -31,7 +31,7 @@ class Thinker:
     to help Claude make better decisions.
     """
 
-    def __init__(self, memory: MemoryStore, search_engine: SearchEngine, llm: LLM):
+    def __init__(self, memory: MemoryStore, search_engine: SearchEngine, llm: LLMClient):
         self.memory = memory
         self.search = search_engine
         self.llm = llm
