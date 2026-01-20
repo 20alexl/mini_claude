@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -m mini_claude.hooks.remind prompt 2>/dev/null || echo ''",
+            "command": "python3 -m mini_claude.hooks.remind prompt \"$USER_PROMPT\" 2>/dev/null || echo ''",
             "timeout": 2000
           }
         ]

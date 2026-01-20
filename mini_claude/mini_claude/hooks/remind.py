@@ -293,6 +293,107 @@ def get_scope_status() -> dict:
 
 
 # ============================================================================
+# THINKING TOOL ENFORCEMENT - 3-Tier Progressive System
+# ============================================================================
+
+def detect_complex_task(prompt: str) -> tuple[bool, str, int]:
+    """
+    Detect if prompt indicates a complex task requiring Thinker tools.
+
+    Returns:
+        (is_complex, detected_pattern, tier_level)
+        tier_level: 1 = suggestion, 2 = strong warning, 3 = blocking
+    """
+    prompt_lower = prompt.lower()
+
+    # Tier 2: Strong warning keywords (architectural/design work)
+    tier2_keywords = [
+        "implement", "add feature", "refactor", "architecture",
+        "design", "build new", "create system", "integrate",
+        "authentication", "authorization", "payment", "security"
+    ]
+
+    for keyword in tier2_keywords:
+        if keyword in prompt_lower:
+            return (True, keyword, 2)
+
+    # Tier 1: Gentle suggestion keywords (moderate complexity)
+    tier1_keywords = [
+        "add", "create", "modify", "update", "change",
+        "improve", "optimize", "enhance"
+    ]
+
+    for keyword in tier1_keywords:
+        if keyword in prompt_lower:
+            # Check for complexity indicators
+            if len(prompt.split()) > 15:  # Long prompt = complex
+                return (True, keyword, 1)
+            if "multiple" in prompt_lower or "several" in prompt_lower:
+                return (True, keyword, 1)
+
+    return (False, "", 0)
+
+
+def check_loop_detected(file_path: str = "") -> tuple[bool, int]:
+    """
+    Check if we're in a loop (editing same file repeatedly).
+
+    Returns:
+        (in_loop, edit_count)
+    """
+    loop_status = get_loop_status()
+    file_edits = loop_status.get("file_edit_counts", {})
+
+    if file_path and file_path in file_edits:
+        count = file_edits[file_path]
+        if count >= 3:
+            return (True, count)
+
+    # Check total edits across all files
+    total_edits = loop_status.get("total_edits", 0)
+    if total_edits >= 10:  # Lots of edits without resolution
+        return (True, total_edits)
+
+    return (False, 0)
+
+
+def check_risky_file(file_path: str) -> tuple[bool, str]:
+    """
+    Check if file is high-risk (core infrastructure).
+
+    Returns:
+        (is_risky, reason)
+    """
+    if not file_path:
+        return (False, "")
+
+    filename = Path(file_path).name.lower()
+    parent = Path(file_path).parent.name.lower()
+
+    # High-risk file patterns
+    risky_patterns = {
+        "auth": "authentication/authorization",
+        "login": "authentication",
+        "password": "security-sensitive",
+        "config": "configuration",
+        "settings": "configuration",
+        "database": "data layer",
+        "db": "data layer",
+        "migration": "database schema",
+        "schema": "database schema",
+        "security": "security-critical",
+        "payment": "payment processing",
+        "billing": "billing logic",
+    }
+
+    for pattern, reason in risky_patterns.items():
+        if pattern in filename or pattern in parent:
+            return (True, reason)
+
+    return (False, "")
+
+
+# ============================================================================
 # AUTO-INJECTION - Automatically call Mini Claude tools
 # ============================================================================
 
@@ -468,7 +569,7 @@ def _auto_record_edit(file_path: str, description: str = "auto-tracked"):
 # ENFORCEMENT - Make Mini Claude usage mandatory
 # ============================================================================
 
-def reminder_for_prompt(project_dir: str) -> str:
+def reminder_for_prompt(project_dir: str, prompt: str = "") -> str:
     """
     Generate reminder for UserPromptSubmit hook.
 
@@ -476,12 +577,37 @@ def reminder_for_prompt(project_dir: str) -> str:
     1. session_start must be called
     2. Shows past mistakes to avoid
     3. Reminds about ALL tools to use
+    4. Tier 2 warnings for complex/architectural tasks
     """
     state = load_state()
     session_active = check_session_active(project_dir)
     project_memory = load_project_memory(project_dir)
 
     lines = ["<mini-claude-reminder>"]
+
+    # TIER 2 ENFORCEMENT: Strong warning for architectural/complex tasks
+    if prompt:
+        is_complex, detected_pattern, tier = detect_complex_task(prompt)
+        if tier == 2:
+            lines.append("⚠️" * 15)
+            lines.append("")
+            lines.append(f"ARCHITECTURAL TASK DETECTED: '{detected_pattern}'")
+            lines.append("")
+            lines.append("This appears to be high-impact work. Before coding:")
+            lines.append("  - Multiple approaches exist")
+            lines.append("  - Wrong choice = expensive refactor later")
+            lines.append("  - Security/correctness critical")
+            lines.append("")
+            lines.append("⚠️ STRONGLY RECOMMENDED: Use Thinker tools FIRST:")
+            lines.append("  1. think_explore: Explore ALL approaches (simple → ideal)")
+            lines.append("  2. think_compare: Compare top 2-3 options with pros/cons")
+            lines.append("  3. think_best_practice: What's the 2026 standard?")
+            lines.append("  4. think_challenge: Challenge your assumptions")
+            lines.append("")
+            lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+            lines.append("")
+            lines.append("⚠️" * 15)
+            lines.append("")
 
     if not session_active:
         # Track ignored prompts
@@ -545,6 +671,15 @@ def reminder_for_prompt(project_dir: str) -> str:
     lines.append("- WHEN something breaks: work_log_mistake(description, file_path)")
     lines.append("- WHEN making decisions: work_log_decision(decision, reason)")
     lines.append("- FOR multi-file tasks: scope_declare(task_description, in_scope_files)")
+    lines.append("")
+
+    # THINKING TOOLS - Tier 1 gentle reminder for complex tasks
+    lines.append("💡 For complex tasks, consider THINKING FIRST:")
+    lines.append("- think_compare: Compare multiple approaches with pros/cons")
+    lines.append("- think_explore: Explore solution space before picking first idea")
+    lines.append("- think_challenge: Challenge your assumptions")
+    lines.append("- think_research: Deep research with web + codebase + LLM")
+    lines.append("Remember: Mistakes cost 2x to fix later!")
 
     lines.append("</mini-claude-reminder>")
     return "\n".join(lines)
@@ -608,6 +743,52 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
             for s in auto_check_results["suggestions"]:
                 lines.append(f"  • {s}")
             lines.append("")
+            has_content = True
+
+    # TIER 3 ENFORCEMENT: BLOCKING on loop detection
+    is_loop, loop_count = check_loop_detected(file_path)
+    if is_loop:
+        lines.append("🛑" * 15)
+        lines.append("")
+        lines.append(f"LOOP DETECTED - SAME FILE EDITED {loop_count} TIMES")
+        lines.append("")
+        lines.append("You are stuck in a loop. Editing the same file repeatedly suggests:")
+        lines.append("  - Your approach isn't working")
+        lines.append("  - You're missing root cause")
+        lines.append("  - You need to THINK, not code more")
+        lines.append("")
+        lines.append("🛑 REQUIRED: Use these tools BEFORE editing again:")
+        lines.append("  1. think_challenge: Challenge your current approach")
+        lines.append("  2. think_explore: Explore alternative solutions")
+        lines.append("  3. think_research: Research the problem deeper")
+        lines.append("")
+        lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+        lines.append("")
+        lines.append("🛑" * 15)
+        has_content = True
+
+    # TIER 2 ENFORCEMENT: Strong warnings for risky files
+    if file_path:
+        is_risky, risk_reason = check_risky_file(file_path)
+        if is_risky:
+            lines.append("⚠️" * 15)
+            lines.append("")
+            lines.append(f"HIGH-RISK FILE: {risk_reason}")
+            lines.append("")
+            lines.append(f"Editing {Path(file_path).name} requires careful thought:")
+            lines.append("  - Changes here affect critical functionality")
+            lines.append("  - Bugs here have high impact")
+            lines.append("  - Security/data integrity at stake")
+            lines.append("")
+            lines.append("⚠️ STRONGLY RECOMMENDED: Think first:")
+            lines.append("  • think_explore: What are all the approaches?")
+            lines.append("  • think_challenge: Is this change necessary?")
+            lines.append("  • think_best_practice: What's the right pattern?")
+            lines.append("  • impact_analyze: What breaks if this fails?")
+            lines.append("")
+            lines.append("Quality over speed. Mistakes cost 2x to fix later.")
+            lines.append("")
+            lines.append("⚠️" * 15)
             has_content = True
 
     # ENFORCE: Session must be active
@@ -802,7 +983,8 @@ def main():
     project_dir = get_project_dir()
 
     if hook_type == "prompt":
-        print(reminder_for_prompt(project_dir))
+        prompt_text = sys.argv[2] if len(sys.argv) > 2 else ""
+        print(reminder_for_prompt(project_dir, prompt_text))
 
     elif hook_type == "edit":
         file_path = sys.argv[2] if len(sys.argv) > 2 else ""
@@ -867,7 +1049,8 @@ def main():
         mark_mistake_logged()
 
     else:
-        print(reminder_for_prompt(project_dir))
+        prompt_text = sys.argv[2] if len(sys.argv) > 2 else ""
+        print(reminder_for_prompt(project_dir, prompt_text))
 
 
 if __name__ == "__main__":
