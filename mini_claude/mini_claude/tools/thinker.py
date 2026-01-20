@@ -85,7 +85,10 @@ class Thinker:
                 if codebase_results.data and codebase_results.data.get("findings"):
                     findings.append("\n## Existing Patterns in Codebase")
                     for finding in codebase_results.data["findings"][:3]:
-                        findings.append(f"- {finding.get('file', 'unknown')}: {finding.get('summary', '')}")
+                        if isinstance(finding, dict):
+                            findings.append(f"- {finding.get('file', 'unknown')}: {finding.get('summary', '')}")
+                        else:
+                            findings.append(f"- {str(finding)}")
                     work_log.what_worked.append("Found existing patterns in codebase")
             except Exception as e:
                 work_log.what_failed.append(f"Codebase search failed: {str(e)}")
@@ -94,10 +97,15 @@ class Thinker:
         reasoning_prompt = self._build_research_prompt(question, context, findings, depth)
 
         try:
-            reasoning = self.llm.generate(reasoning_prompt)
-            findings.append("\n## Analysis")
-            findings.append(reasoning)
-            work_log.what_worked.append("Generated reasoning with LLM")
+            result = self.llm.generate(reasoning_prompt)
+            if result.get("success"):
+                reasoning = result.get("response", "")
+                findings.append("\n## Analysis")
+                findings.append(reasoning)
+                work_log.what_worked.append("Generated reasoning with LLM")
+            else:
+                findings.append("\n## Analysis")
+                findings.append(f"(LLM error: {result.get('error', 'unknown')})")
         except Exception as e:
             work_log.what_failed.append(f"LLM reasoning failed: {str(e)}")
             findings.append("\n## Analysis")
@@ -171,8 +179,13 @@ Then provide a recommendation based on the context.
 Format as clear markdown with headers."""
 
         try:
-            comparison = self.llm.generate(prompt)
-            work_log.what_worked.append("Generated comparison with LLM")
+            result = self.llm.generate(prompt)
+            if result.get("success"):
+                comparison = result.get("response", "")
+                work_log.what_worked.append("Generated comparison with LLM")
+            else:
+                comparison = f"LLM error: {result.get('error', 'unknown')}"
+                work_log.what_failed.append(comparison)
         except Exception as e:
             work_log.what_failed.append(f"LLM comparison failed: {str(e)}")
             comparison = "LLM comparison unavailable"
@@ -224,8 +237,13 @@ Be direct and critical. Point out if this seems like premature optimization,
 over-engineering, or tunnel vision."""
 
         try:
-            challenge = self.llm.generate(prompt)
-            work_log.what_worked.append("Generated challenge with LLM")
+            result = self.llm.generate(prompt)
+            if result.get("success"):
+                challenge = result.get("response", "")
+                work_log.what_worked.append("Generated challenge with LLM")
+            else:
+                challenge = f"LLM error: {result.get('error', 'unknown')}"
+                work_log.what_failed.append(challenge)
         except Exception as e:
             work_log.what_failed.append(f"LLM challenge failed: {str(e)}")
             challenge = "LLM challenge unavailable"
@@ -283,8 +301,13 @@ For each approach:
 Don't just pick one - show the solution space."""
 
         try:
-            exploration = self.llm.generate(prompt)
-            work_log.what_worked.append("Generated exploration with LLM")
+            result = self.llm.generate(prompt)
+            if result.get("success"):
+                exploration = result.get("response", "")
+                work_log.what_worked.append("Generated exploration with LLM")
+            else:
+                exploration = f"LLM error: {result.get('error', 'unknown')}"
+                work_log.what_failed.append(exploration)
         except Exception as e:
             work_log.what_failed.append(f"LLM exploration failed: {str(e)}")
             exploration = "LLM exploration unavailable"
@@ -377,10 +400,15 @@ Focus on:
 Be specific and practical."""
 
         try:
-            synthesis = self.llm.generate(synthesis_prompt)
-            findings.append("\n## Synthesis")
-            findings.append(synthesis)
-            work_log.what_worked.append("Synthesized best practices")
+            result = self.llm.generate(synthesis_prompt)
+            if result.get("success"):
+                synthesis = result.get("response", "")
+                findings.append("\n## Synthesis")
+                findings.append(synthesis)
+                work_log.what_worked.append("Synthesized best practices")
+            else:
+                findings.append("\n## Synthesis")
+                findings.append(f"(LLM error: {result.get('error', 'unknown')})")
         except Exception as e:
             work_log.what_failed.append(f"LLM synthesis failed: {str(e)}")
 
