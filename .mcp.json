@@ -2,8 +2,10 @@
   "mcpServers": {
     "mini-claude": {
       "command": "/media/alex/New Volume/Code/mini_cluade/venv/bin/python",
-      "args": ["-m", "mini_claude.server"],
-      "env": {}
+      "args": [
+        "-m",
+        "mini_claude.server"
+      ]
     }
   }
 }

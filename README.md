@@ -8,48 +8,84 @@ Claude Code forgets everything between sessions:
 - Repeats the same mistakes
 - Forgets why things are structured a certain way
 - Loses context about project conventions
-- Can't learn from past errors
+- Gets stuck in loops editing the same file
+- Over-refactors beyond the requested scope
 
 ## The Solution
 
 Mini Claude is your junior developer who:
 - **Remembers** what you learned across sessions
 - **Warns** you about past mistakes before you repeat them
-- **Tracks** your work automatically
+- **Tracks** your work and detects loops
+- **Guards** scope to prevent over-refactoring
 - **Reminds** you to use the right tools (via hooks)
 
 ## Quick Install
 
 ```bash
-# 1. Clone and enter directory
-git clone https://github.com/yourname/mini-claude.git
-cd mini-claude
+# 1. Clone the repository
+git clone https://github.com/20alexl/mini_claude.git
+cd mini_claude
 
-# 2. Install Ollama and the model
+# 2. Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# or: venv\Scripts\activate  # Windows
+
+# 3. Install Ollama and the model
+# See https://ollama.ai for installation
 ollama pull qwen2.5-coder:7b
 
-# 3. Run the installer
+# 4. Run the installer
 python install.py
 ```
 
-The installer will:
-- Install the mini_claude package
-- Configure the MCP server for Claude Code
-- Set up hooks that remind Claude to use the tools
+## Setting Up Your Projects
 
-**Restart Claude Code** after installation.
+Mini Claude uses a `.mcp.json` file in each project to connect. After installation:
+
+### Option 1: Use the setup command (recommended)
+
+```bash
+# From the mini_claude directory, with venv activated:
+python install.py --setup /path/to/your/project
+```
+
+This creates:
+- `.mcp.json` - MCP server configuration
+- `CLAUDE.md` - Instructions for Claude (optional)
+
+### Option 2: Copy manually
+
+Copy the `.mcp.json` file from the mini_claude directory to your project root.
+
+### Option 3: Create manually
+
+Create `.mcp.json` in your project root:
+
+```json
+{
+  "mcpServers": {
+    "mini-claude": {
+      "command": "/path/to/mini_claude/venv/bin/python",
+      "args": ["-m", "mini_claude.server"]
+    }
+  }
+}
+```
+
+**Important:** Replace `/path/to/mini_claude` with the actual path where you cloned this repo.
+
+## After Setup
+
+1. Open your project in VSCode
+2. Start Claude Code (Ctrl+Shift+P → "Claude: Open")
+3. **Approve the mini-claude MCP server** when prompted
+4. Ask Claude to run: `session_start(project_path="/your/project")`
 
 ## How It Works
 
-### 1. Automatic Reminders (Hooks)
-
-Mini Claude installs hooks that inject reminders into Claude's context:
-
-- **On every prompt** - Reminds Claude about session_start and past mistakes
-- **Before editing files** - Warns about past mistakes with that file
-- **When commands fail** - Suggests logging the mistake
-
-### 2. Session Memory
+### 1. Session Memory
 
 Each project gets its own memory. When Claude starts working:
 
@@ -62,7 +98,7 @@ This loads:
 - Coding conventions to follow
 - **Past mistakes** (shown as warnings!)
 
-### 3. Mistake Tracking
+### 2. Mistake Tracking
 
 When something breaks:
 
@@ -81,7 +117,26 @@ Next session, Claude sees:
   - Forgot to handle empty input - Fix: Always validate input first
 ```
 
-## All 18 Tools
+### 3. Loop Detection
+
+Mini Claude tracks how many times each file is edited:
+- **2 edits**: Warning shown
+- **3+ edits**: Loud warning - "Try a different approach"
+
+### 4. Scope Guard
+
+Declare what files Claude is allowed to edit:
+
+```
+mcp__mini-claude__scope_declare(
+  task_description="Fix login bug",
+  in_scope_files=["auth.py", "login.py"]
+)
+```
+
+If Claude tries to edit other files, it gets a warning.
+
+## All 38 Tools
 
 ### Session & Memory
 | Tool | What It Does |
@@ -100,11 +155,38 @@ Next session, Claude sees:
 | `work_session_summary` | See what happened this session |
 | `work_save_session` | Persist session to memory |
 
-### Safety Checks
+### Safety Guards
 | Tool | What It Does |
 |------|--------------|
-| `impact_analyze` | Check what depends on a file |
-| `convention_check` | Check code against rules |
+| `code_quality_check` | Check code for issues before writing |
+| `loop_record_edit` | Record file edit for loop detection |
+| `loop_check_before_edit` | Check if editing might cause loop |
+| `loop_record_test` | Record test results |
+| `loop_status` | Get loop detection status |
+| `scope_declare` | Declare files in scope for task |
+| `scope_check` | Check if file is in scope |
+| `scope_expand` | Add files to scope |
+| `scope_status` | Get scope status |
+| `scope_clear` | Clear scope when done |
+
+### Context Protection
+| Tool | What It Does |
+|------|--------------|
+| `context_checkpoint_save` | Save task state |
+| `context_checkpoint_restore` | Restore task state |
+| `context_checkpoint_list` | List saved checkpoints |
+| `context_instruction_add` | Add critical instruction |
+| `context_instruction_reinforce` | Get instruction reminders |
+| `context_claim_completion` | Claim task complete |
+| `context_self_check` | Verify claimed work |
+| `context_handoff_create` | Create session handoff |
+| `context_handoff_get` | Get previous handoff |
+
+### Output Validation
+| Tool | What It Does |
+|------|--------------|
+| `output_validate_code` | Detect silent failure patterns |
+| `output_validate_result` | Check outputs for fakes |
 
 ### Search & Analysis
 | Tool | What It Does |
@@ -113,12 +195,14 @@ Next session, Claude sees:
 | `scout_analyze` | Analyze code with LLM |
 | `file_summarize` | Summarize a file |
 | `deps_map` | Map dependencies |
+| `impact_analyze` | Check what depends on a file |
 
 ### Conventions
 | Tool | What It Does |
 |------|--------------|
 | `convention_add` | Store a coding rule |
 | `convention_get` | Get project rules |
+| `convention_check` | Check code against rules |
 
 ### Status
 | Tool | What It Does |
@@ -146,6 +230,9 @@ Next session, Claude sees:
 │              ~/.mini_claude/                       │
 │  memory.json - Per-project memories               │
 │  conventions.json - Per-project rules             │
+│  hook_state.json - Enforcement tracking           │
+│  loop_detector.json - Edit tracking               │
+│  scope_guard.json - Scope tracking                │
 └───────────────────────────────────────────────────┘
 ```
 
@@ -153,106 +240,30 @@ Next session, Claude sees:
 
 - Python 3.10+
 - [Ollama](https://ollama.ai) with `qwen2.5-coder:7b`
-- Claude Code
+- Claude Code (VSCode extension)
 
-## Manual Installation
+## Troubleshooting
 
-If you prefer not to use the installer:
+### MCP server not connecting
 
-### 1. Install the package
+1. Check `.mcp.json` exists in your project root
+2. Check the python path in `.mcp.json` is correct
+3. Restart Claude Code (reload VSCode window)
+4. Look for "Approve MCP server" prompt
+
+### Ollama not running
 
 ```bash
-cd mini-claude
-python -m venv venv
+ollama serve  # Start Ollama
+ollama pull qwen2.5-coder:7b  # Pull the model
+```
+
+### Package not found
+
+```bash
+cd /path/to/mini_claude
 source venv/bin/activate
 pip install -e mini_claude/
-```
-
-### 2. Configure MCP Server
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "mcpServers": {
-    "mini-claude": {
-      "command": "/path/to/mini-claude/venv/bin/python",
-      "args": ["-m", "mini_claude.server"]
-    }
-  }
-}
-```
-
-### 3. Configure Hooks (Optional but recommended)
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "matcher": "",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -m mini_claude.hooks.remind prompt 2>/dev/null || echo ''",
-            "timeout": 2000
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -m mini_claude.hooks.remind edit 2>/dev/null || echo ''",
-            "timeout": 1000
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## Usage
-
-### First time with a project
-
-```
-You: "Start working on this project"
-Claude: *calls session_start*
-        Loaded 0 memories, 0 conventions.
-        No past mistakes recorded.
-```
-
-### After you've used it for a while
-
-```
-You: "Let's continue working"
-Claude: *calls session_start*
-
-        ### Warnings
-        - Past mistakes to remember:
-          - Forgot to run tests after editing handlers.py
-          - Passed None to warnings field in MiniClaudeResponse
-
-        ### Conventions
-        - Keep server.py thin (routing only)
-        - Methods under 50 lines
-```
-
-### When something breaks
-
-```
-You: "The tests are failing"
-Claude: *calls work_log_mistake*
-        Logged: "Tests failing due to missing import"
-
-        This will warn you next session.
 ```
 
 ## Why Local LLM?
