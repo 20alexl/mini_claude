@@ -21,6 +21,18 @@ import time
 import re
 from pathlib import Path
 
+# Import habit tracker for smart suggestions
+try:
+    from ..tools.habit_tracker import suggest_tool_for_context, get_habit_feedback, record_risky_edit_without_thinking
+except ImportError:
+    # Fallback if habit tracker not available
+    def suggest_tool_for_context(context, risk_reason=""):
+        return ("think_explore", "Explore solution space before coding")
+    def get_habit_feedback():
+        return ""
+    def record_risky_edit_without_thinking(file_path, risk_reason):
+        pass
+
 
 # ============================================================================
 # State Tracking - Track EVERYTHING Claude does and doesn't do
@@ -338,15 +350,32 @@ def check_loop_detected(file_path: str = "") -> tuple[bool, int]:
     """
     Check if we're in a loop (editing same file repeatedly).
 
+    SMART DETECTION:
+    - If tests are PASSING: 3+ edits = iterative improvement (not a loop)
+    - If tests are FAILING: 3+ edits = death spiral (LOOP!)
+    - No test data: 3+ edits = potential loop (warn)
+
     Returns:
         (in_loop, edit_count)
     """
     loop_status = get_loop_status()
     file_edits = loop_status.get("file_edit_counts", {})
+    test_results = loop_status.get("recent_test_results", [])
 
     if file_path and file_path in file_edits:
         count = file_edits[file_path]
         if count >= 3:
+            # SMART: Check test context
+            # If last 2 tests passed, this is iterative improvement, not a loop
+            if len(test_results) >= 2:
+                last_two_passed = all(t.get("passed") for t in test_results[-2:])
+                if last_two_passed:
+                    # Tests passing = iterative improvement, not a loop
+                    return (False, count)
+                else:
+                    # Tests failing = death spiral!
+                    return (True, count)
+            # No test data = assume potential loop
             return (True, count)
 
     # Check total edits across all files
@@ -585,10 +614,13 @@ def reminder_for_prompt(project_dir: str, prompt: str = "") -> str:
 
     lines = ["<mini-claude-reminder>"]
 
-    # TIER 2 ENFORCEMENT: Strong warning for architectural/complex tasks
+    # TIER 2 ENFORCEMENT: Strong warning for architectural/complex tasks with SMART SUGGESTIONS
     if prompt:
         is_complex, detected_pattern, tier = detect_complex_task(prompt)
         if tier == 2:
+            # Get smart tool suggestion based on context
+            suggested_tool, tool_reason = suggest_tool_for_context(prompt, detected_pattern)
+
             lines.append("⚠️" * 15)
             lines.append("")
             lines.append(f"ARCHITECTURAL TASK DETECTED: '{detected_pattern}'")
@@ -598,11 +630,16 @@ def reminder_for_prompt(project_dir: str, prompt: str = "") -> str:
             lines.append("  - Wrong choice = expensive refactor later")
             lines.append("  - Security/correctness critical")
             lines.append("")
-            lines.append("⚠️ STRONGLY RECOMMENDED: Use Thinker tools FIRST:")
-            lines.append("  1. think_explore: Explore ALL approaches (simple → ideal)")
-            lines.append("  2. think_compare: Compare top 2-3 options with pros/cons")
-            lines.append("  3. think_best_practice: What's the 2026 standard?")
-            lines.append("  4. think_challenge: Challenge your assumptions")
+            lines.append(f"⚠️ RECOMMENDED: Start with {suggested_tool}")
+            lines.append(f"   WHY: {tool_reason}")
+            lines.append("")
+            lines.append("Other tools you might need:")
+            # Show other tools but de-emphasize them
+            other_tools = ["think_explore", "think_compare", "think_best_practice", "think_challenge"]
+            if suggested_tool in other_tools:
+                other_tools.remove(suggested_tool)
+            for tool in other_tools[:2]:  # Show top 2 alternatives
+                lines.append(f"  • {tool}")
             lines.append("")
             lines.append("Quality over speed. Mistakes cost 2x to fix later.")
             lines.append("")
@@ -646,13 +683,19 @@ def reminder_for_prompt(project_dir: str, prompt: str = "") -> str:
             lines.append("🚨" * 15)
             lines.append("")
     else:
-        # Session is active - show useful context
+        # Session is active - show useful context + HABIT FEEDBACK
         mistakes = get_past_mistakes(project_memory)
 
         if mistakes:
             lines.append(f"⚠️ Past mistakes to avoid ({len(mistakes)}):")
             for m in mistakes[-3:]:
                 lines.append(f"  - {m[:80]}")
+            lines.append("")
+
+        # Show habit feedback (gamification!)
+        habit_feedback = get_habit_feedback()
+        if habit_feedback:
+            lines.append(habit_feedback)
             lines.append("")
 
         # Check if scope is declared
@@ -767,10 +810,16 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
         lines.append("🛑" * 15)
         has_content = True
 
-    # TIER 2 ENFORCEMENT: Strong warnings for risky files
+    # TIER 2 ENFORCEMENT: Strong warnings for risky files with SMART SUGGESTIONS
     if file_path:
         is_risky, risk_reason = check_risky_file(file_path)
         if is_risky:
+            # Get smart tool suggestion
+            suggested_tool, tool_reason = suggest_tool_for_context(file_path, risk_reason)
+
+            # Record that risky edit is happening without thinking (will track habit)
+            record_risky_edit_without_thinking(file_path, risk_reason)
+
             lines.append("⚠️" * 15)
             lines.append("")
             lines.append(f"HIGH-RISK FILE: {risk_reason}")
@@ -780,10 +829,10 @@ def reminder_for_edit(project_dir: str, file_path: str = "") -> str:
             lines.append("  - Bugs here have high impact")
             lines.append("  - Security/data integrity at stake")
             lines.append("")
-            lines.append("⚠️ STRONGLY RECOMMENDED: Think first:")
-            lines.append("  • think_explore: What are all the approaches?")
-            lines.append("  • think_challenge: Is this change necessary?")
-            lines.append("  • think_best_practice: What's the right pattern?")
+            lines.append(f"⚠️ RECOMMENDED: Start with {suggested_tool}")
+            lines.append(f"   WHY: {tool_reason}")
+            lines.append("")
+            lines.append("Also consider:")
             lines.append("  • impact_analyze: What breaks if this fails?")
             lines.append("")
             lines.append("Quality over speed. Mistakes cost 2x to fix later.")

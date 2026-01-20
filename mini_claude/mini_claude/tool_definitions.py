@@ -1555,4 +1555,83 @@ Example:
             "required": ["topic"],
         },
     ),
+
+    # =========================================================================
+    # Habit Tracker Tools - Build good coding habits through feedback
+    # =========================================================================
+
+    Tool(
+        name="habit_get_stats",
+        description="""Get habit formation statistics for the last N days.
+
+Shows:
+- How often you use Thinker tools before risky work
+- Loop avoidance rate
+- Overall habit trends
+
+Use this to see if you're building good habits or need to improve.
+
+Example:
+  habit_get_stats(days=7)""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "integer",
+                    "description": "Number of days to analyze (default: 7)",
+                    "default": 7
+                },
+            },
+            "required": [],
+        },
+    ),
+
+    Tool(
+        name="habit_get_feedback",
+        description="""Get encouraging or warning feedback based on your habits.
+
+Provides:
+- Gamified feedback on habit performance
+- Specific suggestions for improvement
+- Encouragement for good habits
+
+Use this to stay motivated and build better habits.
+
+Example:
+  habit_get_feedback()""",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    ),
+
+    Tool(
+        name="habit_session_summary",
+        description="""Get a comprehensive session summary for handoff to next session.
+
+CALL THIS BEFORE ENDING A SESSION!
+
+Combines:
+- Files edited and why
+- Decisions made and reasoning
+- Mistakes logged
+- Habit performance stats
+- Tips for next session
+
+This creates a perfect handoff document for the next Claude instance.
+
+Example:
+  habit_session_summary(project_path="/path/to/project")""",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional project directory"
+                },
+            },
+            "required": [],
+        },
+    ),
 ]

@@ -347,6 +347,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 year=arguments.get("year", 2026),
             )
 
+        # Habit Tracker Tools
+        case "habit_get_stats":
+            return await handlers.habit_get_stats(
+                days=arguments.get("days", 7),
+            )
+
+        case "habit_get_feedback":
+            return await handlers.habit_get_feedback()
+
+        case "habit_session_summary":
+            return await handlers.habit_session_summary(
+                project_path=arguments.get("project_path"),
+            )
+
         case _:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 

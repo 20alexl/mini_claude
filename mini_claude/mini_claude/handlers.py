@@ -35,6 +35,7 @@ from .tools.loop_detector import LoopDetector
 from .tools.scope_guard import ScopeGuard
 from .tools.context_guard import ContextGuard
 from .tools.output_validator import OutputValidator
+from .tools.habit_tracker import get_habit_tracker
 
 
 class Handlers:
@@ -65,6 +66,7 @@ class Handlers:
         self.git_helper = GitHelper(self.memory, self.work_tracker)
         self.momentum_tracker = MomentumTracker()
         self.thinker = Thinker(self.memory, self.search_engine, self.llm)
+        self.habit_tracker = get_habit_tracker()
 
         # Track session state to remind Claude to use tools properly
         self._active_sessions: set[str] = set()  # project paths with active sessions
@@ -1196,6 +1198,150 @@ class Handlers:
         response = await loop.run_in_executor(
             None,
             lambda: self.thinker.best_practice(topic, language_or_framework, year)
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    # -------------------------------------------------------------------------
+    # Habit Tracker Tools - Track tool usage patterns and build good habits
+    # -------------------------------------------------------------------------
+
+    async def habit_get_stats(
+        self,
+        days: int,
+    ) -> list[TextContent]:
+        """Get habit formation statistics for the last N days."""
+        loop = asyncio.get_event_loop()
+        stats = await loop.run_in_executor(
+            None,
+            lambda: self.habit_tracker.get_habit_stats(days)
+        )
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning=f"Retrieved habit stats for last {days} days",
+            data=stats,
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def habit_get_feedback(self) -> list[TextContent]:
+        """Get encouraging or warning feedback based on habits."""
+        loop = asyncio.get_event_loop()
+        feedback = await loop.run_in_executor(
+            None,
+            lambda: self.habit_tracker.get_habit_feedback()
+        )
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning="Generated habit feedback",
+            data={"feedback": feedback},
+        )
+        return [TextContent(type="text", text=response.to_formatted_string())]
+
+    async def habit_session_summary(
+        self,
+        project_path: str | None,
+    ) -> list[TextContent]:
+        """
+        Get a comprehensive session summary for handoff.
+
+        Combines:
+        - Habit stats
+        - Work session summary
+        - Context handoff
+        """
+        loop = asyncio.get_event_loop()
+
+        # Get habit stats
+        habit_stats = await loop.run_in_executor(
+            None,
+            lambda: self.habit_tracker.get_habit_stats(7)
+        )
+
+        # Get work summary
+        work_summary = await loop.run_in_executor(
+            None,
+            lambda: self.work_tracker.get_session_summary()
+        )
+
+        # Get context handoff if exists
+        handoff = await loop.run_in_executor(
+            None,
+            lambda: self.context_guard.get_handoff()
+        )
+
+        # Build comprehensive summary
+        lines = []
+        lines.append("=" * 60)
+        lines.append("SESSION SUMMARY")
+        lines.append("=" * 60)
+        lines.append("")
+
+        # Work accomplished
+        if work_summary.get("edits"):
+            lines.append(f"📝 Files Edited ({len(work_summary['edits'])}):")
+            for edit in work_summary['edits'][:10]:
+                lines.append(f"  • {edit.get('file_path', 'unknown')}: {edit.get('description', '')}")
+            lines.append("")
+
+        # Decisions made
+        if work_summary.get("decisions"):
+            lines.append(f"🧠 Decisions Made ({len(work_summary['decisions'])}):")
+            for dec in work_summary['decisions'][:5]:
+                lines.append(f"  • {dec.get('decision', '')}")
+                lines.append(f"    → {dec.get('reason', '')}")
+            lines.append("")
+
+        # Mistakes logged
+        if work_summary.get("mistakes"):
+            lines.append(f"⚠️  Mistakes Logged ({len(work_summary['mistakes'])}):")
+            for mistake in work_summary['mistakes'][:3]:
+                lines.append(f"  • {mistake.get('description', '')}")
+            lines.append("")
+
+        # Habit performance
+        lines.append("📊 Habit Performance:")
+        think_rate = habit_stats.get('think_rate', 0)
+        if think_rate >= 80:
+            lines.append(f"  ✅ Excellent! {think_rate:.0f}% thought before risky work")
+        elif think_rate >= 50:
+            lines.append(f"  ⚠️  {think_rate:.0f}% thought before risky work (goal: 80%)")
+        elif think_rate > 0:
+            lines.append(f"  🔴 Only {think_rate:.0f}% thought before risky work")
+        else:
+            lines.append("  🔴 Didn't use Thinker tools for risky work")
+
+        if habit_stats.get('loops_hit', 0) > 0:
+            lines.append(f"  ⚠️  Hit {habit_stats['loops_hit']} loop(s)")
+        elif habit_stats.get('loops_avoided', 0) > 0:
+            lines.append(f"  ✅ Avoided {habit_stats['loops_avoided']} loop(s)")
+        lines.append("")
+
+        # Next session tips
+        lines.append("💡 For Next Session:")
+        if think_rate < 80:
+            lines.append("  • Use Thinker tools more before architectural work")
+        if habit_stats.get('loops_hit', 0) > 0:
+            lines.append("  • When stuck, step back and use think_challenge or think_explore")
+        lines.append("  • Run session_start at the beginning")
+        if handoff.get('next_steps'):
+            lines.append("  • Check context_handoff_get for continuation plan")
+        lines.append("")
+        lines.append("=" * 60)
+
+        summary_text = "\n".join(lines)
+
+        response = MiniClaudeResponse(
+            status="success",
+            confidence="high",
+            reasoning="Generated comprehensive session summary",
+            data={
+                "summary": summary_text,
+                "habit_stats": habit_stats,
+                "work_summary": work_summary,
+            },
         )
         return [TextContent(type="text", text=response.to_formatted_string())]
 
