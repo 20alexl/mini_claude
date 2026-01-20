@@ -100,6 +100,140 @@ This creates a `.mcp.json` in your project that overrides the global config.
 
 **That's it!** Mini Claude runs automatically via hooks.
 
+## Getting Started: Your First Prompt
+
+**IMPORTANT:** Give Claude a clear, complete prompt upfront. This helps Mini Claude guide the entire project effectively.
+
+### Example Prompt Template
+
+```
+Build a [PROJECT TYPE] in Python with the following requirements:
+
+CORE FEATURES:
+1. [Feature 1]
+2. [Feature 2]
+3. [Feature 3]
+
+TECHNICAL REQUIREMENTS:
+- [Database/storage choice]
+- [Authentication if needed]
+- [Libraries to use]
+- [Error handling requirements]
+- [Testing requirements with coverage %]
+- [Type hints/documentation requirements]
+
+PROJECT STRUCTURE:
+project_name/
+├── src/
+│   ├── __init__.py
+│   ├── main.py
+│   └── [other modules]
+├── tests/
+│   └── [test files]
+├── README.md
+└── requirements.txt
+
+IMPLEMENTATION STEPS:
+1. [Step 1]
+2. [Step 2]
+3. [Step 3]
+
+CONSTRAINTS:
+- [Edge cases to handle]
+- [Validation requirements]
+- [Performance requirements]
+
+CONVENTIONS TO FOLLOW:
+- Use snake_case for Python code
+- Maximum function length: 50 lines
+- Write docstrings for all public functions
+- Use pathlib instead of os.path
+```
+
+### Real Example: Personal Finance CLI Tracker
+
+<details>
+<summary>Click to see a complete example prompt</summary>
+
+```
+Build a personal finance CLI tracker in Python with the following requirements:
+
+CORE FEATURES:
+1. Track expenses and income with categories
+2. Set monthly budgets per category
+3. Generate monthly spending reports
+4. Support multiple currencies with conversion
+5. Export data to CSV and JSON
+6. Recurring transactions (monthly bills, salary)
+
+TECHNICAL REQUIREMENTS:
+- Use SQLite for data storage
+- Support user authentication
+- Use rich library for beautiful CLI output
+- Comprehensive error handling
+- pytest tests with >80% coverage
+- Type hints throughout
+- Security best practices (encrypted passwords)
+
+PROJECT STRUCTURE:
+finance_tracker/
+├── finance_tracker/
+│   ├── __init__.py
+│   ├── cli.py          # Main CLI interface
+│   ├── database.py     # Database operations
+│   ├── models.py       # Data models
+│   ├── auth.py         # User authentication
+│   ├── currency.py     # Currency conversion
+│   ├── reports.py      # Report generation
+│   └── config.py       # Configuration
+├── tests/
+│   ├── test_database.py
+│   ├── test_auth.py
+│   └── test_reports.py
+├── README.md
+├── requirements.txt
+└── setup.py
+
+IMPLEMENTATION STEPS:
+1. Set up project structure
+2. Implement database schema
+3. Build authentication system
+4. Create transaction tracking
+5. Add budget management
+6. Implement currency conversion
+7. Build reporting features
+8. Write comprehensive tests
+9. Add CLI interface with rich
+10. Document everything
+
+CONSTRAINTS:
+- Handle negative amounts, invalid dates, duplicates
+- Validate all user input
+- Support data import/export
+- Work offline (except currency conversion)
+- Installable via pip
+
+CONVENTIONS TO FOLLOW:
+- Use snake_case for all Python code
+- Maximum function length: 50 lines
+- Write docstrings for all public functions
+- Use pathlib instead of os.path
+- Prefer composition over inheritance
+- Never use bare except clauses
+```
+
+</details>
+
+**Why this approach works:**
+- ✅ Claude sees the full scope upfront
+- ✅ Mini Claude can suggest relevant tools early
+- ✅ Scope guard knows what files are in scope
+- ✅ Decision logging captures architectural choices
+- ✅ You get better, more focused results
+
+**After the initial prompt:**
+Just interact normally! Ask Claude questions, request changes, debug issues. Mini Claude works in the background.
+
 ## Your First Session
 
 When you start working, Claude will see:
