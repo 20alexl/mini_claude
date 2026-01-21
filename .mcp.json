@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "mini-claude": {
-      "command": "D:\\Code\\mini_cl\\mini_claude\\run_server.bat",
+      "command": "/path/to/mini_claude/run_server.sh",
       "args": []
     }
   }
