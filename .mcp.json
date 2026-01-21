@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "mini-claude": {
-      "command": "/media/alex/New Volume/Code/mini_cluade/run_server.sh",
+      "command": "D:\\Code\\mini_cl\\mini_claude\\run_server.bat",
       "args": []
     }
   }

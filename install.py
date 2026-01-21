@@ -22,9 +22,15 @@ Requirements:
 
 import json
 import os
+import platform
 import subprocess
 import sys
 from pathlib import Path
+
+
+def is_windows():
+    """Check if running on Windows."""
+    return platform.system() == "Windows"
 
 
 def print_step(step: int, total: int, message: str):
@@ -103,52 +109,97 @@ def create_memory_dir():
 def create_launcher_script():
     """Create a launcher script that handles paths with spaces."""
     script_dir = Path(__file__).parent.resolve()
-    launcher = script_dir / "run_server.sh"
 
-    # Create bash launcher for Linux/Mac
-    launcher_content = '''#!/bin/bash
+    if is_windows():
+        # Create batch launcher for Windows
+        launcher = script_dir / "run_server.bat"
+        launcher_content = '''@echo off
+REM Mini Claude MCP Server launcher for Windows
+REM This wrapper handles paths with spaces
+
+setlocal
+set "SCRIPT_DIR=%~dp0"
+"%SCRIPT_DIR%venv\\Scripts\\python.exe" -m mini_claude.server %*
+'''
+        try:
+            launcher.write_text(launcher_content)
+            return str(launcher)
+        except Exception:
+            return None
+    else:
+        # Create bash launcher for Linux/Mac
+        launcher = script_dir / "run_server.sh"
+        launcher_content = '''#!/bin/bash
 # Mini Claude MCP Server launcher
 # This wrapper handles paths with spaces
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SCRIPT_DIR}/venv/bin/python" -m mini_claude.server "$@"
 '''
-    try:
-        launcher.write_text(launcher_content)
-        launcher.chmod(0o755)
-        return str(launcher)
-    except Exception:
-        return None
+        try:
+            launcher.write_text(launcher_content)
+            launcher.chmod(0o755)
+            return str(launcher)
+        except Exception:
+            return None
 
 
 def create_hook_launcher_script():
     """Create a hook launcher script that handles paths with spaces."""
     script_dir = Path(__file__).parent.resolve()
-    hook_launcher = script_dir / "run_hook.sh"
 
-    # Create bash launcher for hooks
-    hook_content = '''#!/bin/bash
+    if is_windows():
+        # Create batch launcher for Windows hooks
+        hook_launcher = script_dir / "run_hook.bat"
+        hook_content = '''@echo off
+REM Mini Claude Hook launcher for Windows
+REM This wrapper handles paths with spaces for the enforcement hooks
+
+setlocal
+set "SCRIPT_DIR=%~dp0"
+"%SCRIPT_DIR%venv\\Scripts\\python.exe" -m mini_claude.hooks.remind %*
+'''
+        try:
+            hook_launcher.write_text(hook_content)
+            return str(hook_launcher)
+        except Exception:
+            return None
+    else:
+        # Create bash launcher for hooks on Linux/Mac
+        hook_launcher = script_dir / "run_hook.sh"
+        hook_content = '''#!/bin/bash
 # Mini Claude Hook launcher
 # This wrapper handles paths with spaces for the enforcement hooks
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 "${SCRIPT_DIR}/venv/bin/python" -m mini_claude.hooks.remind "$@"
 '''
-    try:
-        hook_launcher.write_text(hook_content)
-        hook_launcher.chmod(0o755)
-        return str(hook_launcher)
-    except Exception:
-        return None
+        try:
+            hook_launcher.write_text(hook_content)
+            hook_launcher.chmod(0o755)
+            return str(hook_launcher)
+        except Exception:
+            return None
 
 
 def get_hooks_config():
     """Generate the hooks configuration for ~/.claude/settings.json."""
     script_dir = Path(__file__).parent.resolve()
-    hook_launcher = script_dir / "run_hook.sh"
 
-    # Use the hook launcher script path
-    hook_cmd = str(hook_launcher)
+    if is_windows():
+        hook_launcher = script_dir / "run_hook.bat"
+        hook_cmd = str(hook_launcher)
+        # Windows uses 2>NUL for stderr redirection
+        stderr_redirect = "2>NUL"
+        # Windows echo syntax
+        echo_cmd = 'echo <mini-claude-post-edit>Remember: loop_record_edit(file_path="%TOOL_INPUT_FILE_PATH%", description="...") to track this change</mini-claude-post-edit>'
+    else:
+        hook_launcher = script_dir / "run_hook.sh"
+        hook_cmd = str(hook_launcher)
+        # Unix uses 2>/dev/null for stderr redirection
+        stderr_redirect = "2>/dev/null"
+        # Unix echo syntax
+        echo_cmd = 'echo \'<mini-claude-post-edit>Remember: loop_record_edit(file_path="$TOOL_INPUT_FILE_PATH", description="...") to track this change</mini-claude-post-edit>\''
 
     return {
         "hooks": {
@@ -158,7 +209,7 @@ def get_hooks_config():
                     "hooks": [
                         {
                             "type": "command",
-                            "command": f'"{hook_cmd}" prompt 2>/dev/null || echo ""',
+                            "command": f'"{hook_cmd}" prompt {stderr_redirect} || echo ""',
                             "timeout": 2000
                         }
                     ]
@@ -170,7 +221,7 @@ def get_hooks_config():
                     "hooks": [
                         {
                             "type": "command",
-                            "command": f'"{hook_cmd}" edit "$TOOL_INPUT_FILE_PATH" 2>/dev/null || echo ""',
+                            "command": f'"{hook_cmd}" edit "$TOOL_INPUT_FILE_PATH" {stderr_redirect} || echo ""',
                             "timeout": 1000
                         }
                     ]
@@ -182,7 +233,7 @@ def get_hooks_config():
                     "hooks": [
                         {
                             "type": "command",
-                            "command": f'"{hook_cmd}" bash "$TOOL_INPUT_COMMAND" "$TOOL_EXIT_CODE" 2>/dev/null || echo ""',
+                            "command": f'"{hook_cmd}" bash "$TOOL_INPUT_COMMAND" "$TOOL_EXIT_CODE" {stderr_redirect} || echo ""',
                             "timeout": 1000
                         }
                     ]
@@ -192,7 +243,7 @@ def get_hooks_config():
                     "hooks": [
                         {
                             "type": "command",
-                            "command": 'echo \'<mini-claude-post-edit>Remember: loop_record_edit(file_path="$TOOL_INPUT_FILE_PATH", description="...") to track this change</mini-claude-post-edit>\'',
+                            "command": echo_cmd,
                             "timeout": 500
                         }
                     ]
@@ -233,7 +284,11 @@ def get_mcp_config():
     script_dir = Path(__file__).parent.resolve()
 
     # Use launcher script (handles paths with spaces better)
-    launcher = script_dir / "run_server.sh"
+    if is_windows():
+        launcher = script_dir / "run_server.bat"
+    else:
+        launcher = script_dir / "run_server.sh"
+
     if launcher.exists():
         return {
             "mcpServers": {
@@ -245,9 +300,10 @@ def get_mcp_config():
         }
 
     # Fallback to direct python path
-    venv_python = script_dir / "venv" / "bin" / "python"
-    if not venv_python.exists():
-        venv_python = script_dir / "venv" / "Scripts" / "python.exe"  # Windows
+    if is_windows():
+        venv_python = script_dir / "venv" / "Scripts" / "python.exe"
+    else:
+        venv_python = script_dir / "venv" / "bin" / "python"
 
     if venv_python.exists():
         python_path = str(venv_python)

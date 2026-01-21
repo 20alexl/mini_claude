@@ -15,6 +15,8 @@ Mini Claude is an MCP server that gives Claude Code:
 
 ## Quick Install
 
+### Linux/Mac
+
 ```bash
 # 1. Install Ollama (if not already installed)
 # Visit https://ollama.ai or:
@@ -29,8 +31,31 @@ cd mini_claude
 
 # 4. Create virtual environment
 python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# or: venv\Scripts\activate  # Windows
+source venv/bin/activate
+
+# 5. Install the package
+pip install -e mini_claude/
+
+# 6. Run the installer
+python install.py
+```
+
+### Windows
+
+```powershell
+# 1. Install Ollama
+# Download from https://ollama.ai and run the installer
+
+# 2. Pull the model
+ollama pull qwen2.5-coder:7b
+
+# 3. Clone and install Mini Claude
+git clone https://github.com/20alexl/mini_claude.git
+cd mini_claude
+
+# 4. Create virtual environment
+python -m venv venv
+venv\Scripts\activate
 
 # 5. Install the package
 pip install -e mini_claude/
@@ -40,53 +65,101 @@ python install.py
 ```
 
 The installer will:
-- Create launcher scripts
+- Create launcher scripts (`.sh` for Linux/Mac, `.bat` for Windows)
 - Generate a global MCP configuration
 - Set up hooks
 - Show you how to use it
 
-**Note:** The `venv` directory must stay! VSCode runs Mini Claude from `venv/bin/python`. Don't delete it or move the repo after installation.
+**Note:** The `venv` directory must stay! Don't delete it or move the repo after installation.
+- Linux/Mac: VSCode runs Mini Claude from `venv/bin/python`
+- Windows: VSCode runs Mini Claude from `venv\Scripts\python.exe`
 
 ## Setup for Your Projects
 
-**Mini Claude works globally** - you install it once and it works in all projects!
+To use Mini Claude effectively, copy **both files** to your project root:
 
-### Option 1: Copy CLAUDE.md (Recommended)
+1. **`.mcp.json`** - Tells Claude Code how to connect to Mini Claude
+2. **`CLAUDE.md`** - Tells Claude how to use Mini Claude tools
 
-Copy the `CLAUDE.md` file from this repo to your project root:
+### Copy Both Files to Your Project
+
+**Linux/Mac:**
 
 ```bash
+cp /path/to/mini_claude/.mcp.json /your/project/.mcp.json
 cp /path/to/mini_claude/CLAUDE.md /your/project/CLAUDE.md
 ```
 
-**What is CLAUDE.md?**
+**Windows:**
+
+```powershell
+copy C:\path\to\mini_claude\.mcp.json C:\your\project\.mcp.json
+copy C:\path\to\mini_claude\CLAUDE.md C:\your\project\CLAUDE.md
+```
+
+**Important:** After copying `.mcp.json`, update the path inside it to point to your mini_claude installation:
+
+- Linux/Mac: `"command": "/path/to/mini_claude/run_server.sh"`
+- Windows: `"command": "C:\\path\\to\\mini_claude\\run_server.bat"`
+
+### What Do These Files Do?
+
+**`.mcp.json`** - MCP Server Configuration
+- Tells VSCode/Claude Code where to find Mini Claude
+- Required for the MCP tools to be available
+- Must contain the correct path to your mini_claude installation
+
+**`CLAUDE.md`** - Instructions for Claude
 - Instructions for Claude Code on how to use Mini Claude
 - Checked into your repo (like a README for AI)
 - Claude reads it automatically when working on your project
 - Ensures Claude uses Mini Claude tools correctly
 
-**Do you NEED it?** No, but highly recommended! Without it:
-- Claude won't know to call `session_start`
-- Won't know when to use which tools
-- Won't follow best practices
+### Do I Need Both Files?
 
-With it:
+| File | Required? | Without It |
+|------|-----------|------------|
+| `.mcp.json` | **Yes** | Mini Claude tools won't be available at all |
+| `CLAUDE.md` | Recommended | Claude won't know to call `session_start`, won't use tools effectively |
+
+With both files:
+- Mini Claude tools are available
 - Claude automatically starts sessions
 - Uses tools at the right time
 - Logs mistakes and decisions
 - Follows project conventions
 
-### Option 2: Per-Project .mcp.json (Advanced)
+### Manual .mcp.json Configuration
 
-If you want project-specific MCP configuration:
+If you need to create `.mcp.json` manually, use the appropriate format for your OS:
 
-```bash
-python install.py --setup /path/to/your/project
+**Linux/Mac:**
+
+```json
+{
+  "mcpServers": {
+    "mini-claude": {
+      "command": "/path/to/mini_claude/run_server.sh",
+      "args": []
+    }
+  }
+}
 ```
 
-This creates a `.mcp.json` in your project that overrides the global config.
+**Windows:**
 
-**Most users don't need this** - the global setup works great!
+```json
+{
+  "mcpServers": {
+    "mini-claude": {
+      "command": "C:\\path\\to\\mini_claude\\run_server.bat",
+      "args": []
+    }
+  }
+}
+```
+
+Replace the path with the actual location of your mini_claude installation.
 
 ## How to Use
 
@@ -456,6 +529,8 @@ Creates a comprehensive summary for the next Claude instance:
 
 ### Use a Different Model
 
+**Linux/Mac:**
+
 ```bash
 # Use a different model
 export MINI_CLAUDE_MODEL="qwen2.5-coder:14b"
@@ -465,6 +540,18 @@ export MINI_CLAUDE_OLLAMA_URL="http://192.168.1.100:11434"
 ```
 
 Add to `~/.bashrc` or `~/.zshrc` to make permanent.
+
+**Windows (PowerShell):**
+
+```powershell
+# Use a different model
+$env:MINI_CLAUDE_MODEL="qwen2.5-coder:14b"
+
+# Custom Ollama URL
+$env:MINI_CLAUDE_OLLAMA_URL="http://192.168.1.100:11434"
+```
+
+To make permanent on Windows, set environment variables via System Properties > Environment Variables.
 
 **Recommended models:**
 - `qwen2.5-coder:7b` (default) - Fast, good quality
@@ -498,9 +585,19 @@ ollama pull qwen2.5-coder:7b  # Pull the model
 
 ### Package Not Found
 
+**Linux/Mac:**
+
 ```bash
 cd /path/to/mini_claude
 source venv/bin/activate
+pip install -e mini_claude/
+```
+
+**Windows:**
+
+```powershell
+cd C:\path\to\mini_claude
+venv\Scripts\activate
 pip install -e mini_claude/
 ```
 
@@ -560,16 +657,19 @@ With it:
 
 **Yes!** The venv must stay where you installed it. Here's why:
 
-- VSCode runs Mini Claude from `venv/bin/python`
+- Linux/Mac: VSCode runs Mini Claude from `venv/bin/python`
+- Windows: VSCode runs Mini Claude from `venv\Scripts\python.exe`
 - The MCP configuration points to this path
 - If you move/delete the venv, Mini Claude stops working
 
 **What you CAN do:**
+
 - Use Mini Claude from multiple projects (it's global)
 - Copy CLAUDE.md to different repos
 - Have different memories per project
 
 **What you CAN'T do:**
+
 - Move the mini_claude repo after installation
 - Delete the venv folder
 - Rename the venv folder
