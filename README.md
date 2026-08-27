@@ -106,6 +106,7 @@ All optional. Deep detail on each lives in the [library-book](./library-book/).
 | `CLAUDE_ENGRAM_EMBED_DIM` | model native | Matryoshka truncation dim. Stores are signature-stamped — model changes rebuild them automatically |
 | `CLAUDE_ENGRAM_DEVICE` | smart | Unset: daemon stays on cpu, bulk jobs use a transient GPU worker (full VRAM release). `cuda`/`cpu` forces one device |
 | `CLAUDE_ENGRAM_GPU_BULK_MIN` | `512` | Job size (texts) that routes to the GPU worker |
+| `CLAUDE_ENGRAM_GPU_BATCH` | `64` | Rows per forward pass on the GPU. Raise it on a card with headroom; the peak scales linearly (~26 MiB/row) |
 | `CLAUDE_ENGRAM_LIVE_MINE` | `300` | Live mining tick interval (seconds); `0` disables |
 | `CLAUDE_ENGRAM_ARCHIVE_DAYS` | `14` | Days until inactive memories archive |
 | `CLAUDE_ENGRAM_SCORER_TIMEOUT` | `1800` | Scorer daemon idle timeout (seconds) |

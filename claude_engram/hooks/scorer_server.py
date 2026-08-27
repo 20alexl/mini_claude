@@ -284,6 +284,13 @@ def _handle_client(conn, holder):
             # much larger batches without breaking a sweat; CPU keeps 64.
             texts = [t[:MAX_ENCODE_CHARS] for t in request["embed_batch"]]
             if texts:
+                # Same cap as the bulk worker. The resident daemon normally
+                # sits on cpu, but CLAUDE_ENGRAM_DEVICE=cuda puts it on the
+                # GPU — and a 256-row batch there parks multi-GB of activations
+                # in a process that never exits, which is strictly worse than
+                # the transient worker's spike.
+                from claude_engram.embed_worker import gpu_batch_size
+
                 on_gpu = str(getattr(model, "device", "cpu")).startswith(
                     ("cuda", "mps")
                 )
@@ -291,7 +298,7 @@ def _handle_client(conn, holder):
                     model.encode,
                     texts,
                     normalize_embeddings=True,
-                    batch_size=256 if on_gpu else 64,
+                    batch_size=gpu_batch_size() if on_gpu else 64,
                 )
                 response = json.dumps({"embeddings": embs.tolist()}) + "\n"
             else:
