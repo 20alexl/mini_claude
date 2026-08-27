@@ -240,6 +240,16 @@ Files that indicate a project root when resolving sub-projects in a workspace:
 
 ## Changelog
 
+### v0.8.13 — 2026-08-27
+
+- **Fixed a real memory leak in the scorer daemon: ~0.73 MB per request, unbounded.** The daemon handles each connection on a fresh thread and ran the model call on that thread. PyTorch keeps per-thread state it does not release when the thread dies, so every request permanently retained ~0.73 MB. Measured dead-linear at **+146 MB per 200 requests across eight consecutive rounds with no plateau** — that is what walks a long-running daemon past 4 GB.
+  - Isolated before fixing: `model.encode()` called 800× on the main thread is flat (1041.3 → 1041.4 MB); the same encode called once per fresh thread grows +0.73 MB each, matching the daemon exactly. Bare thread churn with no model call is flat, and thread/handle counts stayed constant throughout — so it was neither thread accumulation nor a socket/handle leak.
+  - Every model call now runs on one long-lived pinned thread (`_on_model_thread`, a `max_workers=1` executor). That costs nothing: the GIL and torch serialized these calls already. After the fix the same workload is flat — 1043.0 → 1043.4 MB over 800 requests, committed bytes pinned at 2519 MB.
+  - Measure committed/private bytes, not just working set, when checking this on Windows: Windows does not trim working sets without memory pressure, so working set alone can mislead in both directions. Both metrics grew here, which is what confirmed a true leak.
+- **Bounded the VRAM spike.** The transient bulk worker encoded with `batch_size=256` against the encoder's full 512-token window — a multi-GB activation footprint, with observed spikes near 8 GB, which on a 12 GB card contends with anything else training. Batch is now 64 (`CLAUDE_ENGRAM_GPU_BATCH` to override). The spike itself is by design and not a leak: the worker exits, and process exit is the only way to fully release a CUDA context.
+- **Capped encoder input at `MAX_ENCODE_CHARS = 2000`, server-side.** The encoder discards anything past its 512-token window anyway, so oversized text was tokenized and padded at full cost and then thrown away, ratcheting the allocator's high-water mark. `embed_batch` truncated at the client; `embed` and the scorer's no-sentence-break fallback (a pasted log, code, one long line) did not. Applied in the daemon so every caller is covered. Two 20k-word blobs now cost +6 MB instead of hundreds.
+- New `tests/bench_scorer_thread_affinity.py` (10 checks): model work never runs on the caller's thread, 40 concurrent caller threads share one model thread, results and exceptions propagate unchanged, and a source guard fails if any call site in `_handle_client` bypasses the pool — the leak returns silently the moment one does.
+
 ### v0.8.12 — 2026-07-26
 
 - **Consolidation deleted the memories it merged.** `_consolidate_group_with_llm` kept the 5 highest-relevance originals and dropped the rest by reassigning `proj.entries` — nothing wrote them anywhere else, so they were gone for good. That contradicts the rule the rest of the store follows ("cleanup archives before deleting; nothing is lost without review"), and it was latent only because `consolidate` had no dispatch branch until v0.8.9 — wiring the operation is what made it reachable.

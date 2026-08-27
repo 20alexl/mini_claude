@@ -26,6 +26,15 @@ from pathlib import Path
 
 from claude_engram.embed_config import embed_signature
 
+# The encoder discards anything past its max_seq_length (512 tokens for the
+# default bge-base, ~2000 chars), so text longer than this is tokenized and
+# padded at full cost and then thrown away. Capping here is behaviour-
+# preserving and it bounds the allocator's high-water mark: the resident
+# daemon never returns arena memory to the OS, so one oversized encode
+# (a pasted log, a long single-line prompt) permanently raised its RSS.
+# Applied server-side so every caller is covered, not just the batch path.
+MAX_ENCODE_CHARS = 2000
+
 # How long to stay alive without requests (seconds)
 IDLE_TIMEOUT = int(
     os.environ.get("CLAUDE_ENGRAM_SCORER_TIMEOUT", "1800")
@@ -80,9 +89,11 @@ def _score_text(text, model, decision_embs, non_decision_embs):
         return 0.0, ""
 
     sentences = re.split(r"(?<=[.!])\s+|\n+", text)
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 15]
+    sentences = [s.strip()[:MAX_ENCODE_CHARS] for s in sentences if len(s.strip()) > 15]
     if not sentences:
-        sentences = [text.strip()]
+        # No sentence break at all (a pasted log, code, one long line) — this
+        # is the case that used to hand the encoder the entire blob.
+        sentences = [text.strip()[:MAX_ENCODE_CHARS]]
 
     best_score = 0.0
     best_text = ""
@@ -156,6 +167,35 @@ _HOOK_EVENTS = {
     "pre_read_json",
     "tool_failure_json",
 }
+
+# Every model call runs on ONE long-lived thread, never on the ephemeral
+# per-connection thread. PyTorch keeps per-thread state that is not released
+# when a thread dies, so encoding from a fresh thread per request leaked
+# ~0.73 MB each -- measured dead-linear, +146 MB per 200 requests, no plateau,
+# which is what drove the daemon past 4 GB over a long session. The same
+# encode loop on a single thread is flat. max_workers=1 also matches what
+# actually happened before: the GIL plus torch serialized these anyway.
+_MODEL_POOL = None
+_MODEL_POOL_LOCK = threading.Lock()
+
+
+def _model_pool():
+    global _MODEL_POOL
+    if _MODEL_POOL is None:
+        with _MODEL_POOL_LOCK:
+            if _MODEL_POOL is None:
+                from concurrent.futures import ThreadPoolExecutor
+
+                _MODEL_POOL = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="engram-model"
+                )
+    return _MODEL_POOL
+
+
+def _on_model_thread(fn, *args, **kwargs):
+    """Run a model call on the pinned thread and wait for it."""
+    return _model_pool().submit(fn, *args, **kwargs).result()
+
 
 # remind's stdin cache / session id / CLAUDE_PROJECT_DIR are per-event
 # process state; under the daemon they're module globals, so dispatch is
@@ -242,12 +282,13 @@ def _handle_client(conn, holder):
         if "embed_batch" in request:
             # Batch embedding: encode all texts in one model call. GPU takes
             # much larger batches without breaking a sweat; CPU keeps 64.
-            texts = request["embed_batch"]
+            texts = [t[:MAX_ENCODE_CHARS] for t in request["embed_batch"]]
             if texts:
                 on_gpu = str(getattr(model, "device", "cpu")).startswith(
                     ("cuda", "mps")
                 )
-                embs = model.encode(
+                embs = _on_model_thread(
+                    model.encode,
                     texts,
                     normalize_embeddings=True,
                     batch_size=256 if on_gpu else 64,
@@ -258,15 +299,17 @@ def _handle_client(conn, holder):
             conn.sendall(response.encode("utf-8"))
         elif "embed" in request:
             # Single embedding request: return raw vector
-            text = request["embed"]
-            emb = model.encode([text], normalize_embeddings=True)
+            text = request["embed"][:MAX_ENCODE_CHARS]
+            emb = _on_model_thread(
+                model.encode, [text], normalize_embeddings=True
+            )
             response = json.dumps({"embedding": emb[0].tolist()}) + "\n"
             conn.sendall(response.encode("utf-8"))
         else:
             # Decision scoring request
             text = request.get("text", "")
-            score, extracted = _score_text(
-                text, model, decision_embs, non_decision_embs
+            score, extracted = _on_model_thread(
+                _score_text, text, model, decision_embs, non_decision_embs
             )
             response = json.dumps({"score": score, "text": extracted}) + "\n"
             conn.sendall(response.encode("utf-8"))

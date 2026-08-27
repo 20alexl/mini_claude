@@ -30,6 +30,18 @@ import sys
 import tempfile
 
 GPU_BULK_MIN_DEFAULT = 512
+GPU_BATCH_DEFAULT = 64
+MAX_ENCODE_CHARS = 2000
+
+
+def gpu_batch_size() -> int:
+    """Rows per forward pass in the bulk worker. Override with
+    CLAUDE_ENGRAM_GPU_BATCH when a bigger card is free."""
+    raw = os.environ.get("CLAUDE_ENGRAM_GPU_BATCH", "").strip()
+    try:
+        return max(1, int(raw)) if raw else GPU_BATCH_DEFAULT
+    except ValueError:
+        return GPU_BATCH_DEFAULT
 
 
 def bulk_threshold() -> int:
@@ -117,8 +129,16 @@ def main() -> int:
 
         with open(in_path, encoding="utf-8") as f:
             texts = json.load(f)["texts"]
+        # Cap the per-text length and the batch. batch_size=256 against the
+        # encoder's full 512-token window is a multi-GB activation footprint —
+        # measured spikes reached ~8GB, which on a 12GB card contends with
+        # whatever else is training. The model discards anything past
+        # max_seq_length anyway, so the cap costs no quality.
+        texts = [t[:MAX_ENCODE_CHARS] for t in texts]
         model = load_sentence_transformer(device=device)
-        embs = model.encode(texts, normalize_embeddings=True, batch_size=256)
+        embs = model.encode(
+            texts, normalize_embeddings=True, batch_size=gpu_batch_size()
+        )
         np.save(out_path, np.asarray(embs, dtype=np.float32))
         print(f"embedded {len(texts)} texts on {model.device}", file=sys.stderr)
         return 0
