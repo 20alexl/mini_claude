@@ -133,10 +133,14 @@ class Handlers:
                 health.get("suggestion", "Start Ollama to re-enable LLM synthesis")
             )
 
+        # Self-identifying: a bug report is far more useful with a version on it,
+        # and this is the one call people are told to run when something looks off.
+        from . import __version__
+
         response = EngramResponse(
             status="success",
             confidence="high",
-            reasoning="Claude Engram is ready.",
+            reasoning=f"Claude Engram v{__version__} is ready.",
             work_log=WorkLog(
                 what_worked=[
                     embed_line,
@@ -146,6 +150,7 @@ class Handlers:
                 + queue_info
             ),
             data={
+                "version": __version__,
                 "embed_model": embed_signature(),
                 "embed_device": device or "unknown",
                 "ollama_model": self.llm.model,

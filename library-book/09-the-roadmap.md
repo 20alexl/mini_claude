@@ -41,86 +41,42 @@
 | Recurring error grouping by normalized signature | Stable | v0.5.0 |
 | Idempotent version-stamped migrations | Stable | v0.5.0 |
 
-## Done / Shipped (v0.6)
+## Done / Shipped (v0.8.13)
 
 | Feature | Notes |
 |---------|-------|
-| Tool surface consolidation (21 → 19) | Removed `code_pattern_check` (dup of `convention`); folded `code_quality_check` into `audit_batch` (file-paths mode vs inline code/language mode); `instruction_*` context ops removed (use `memory add_rule`); `checkpoint_*` are now primary, `handoff_*` are deprecated aliases. |
-| Per-project code index (`mining/code_index.py`) | Miner Phase 6. AST/regex symbol table per project: exports, classes, methods+signatures, imports, reverse-dependency edges. Sub-project scoped, mtime-incremental, LLM-free. |
-| Pre-edit import/export verification (`hooks/precheck.py`) | Capability 1. Warns before an edit if an import won't resolve against the code index; suggests the closest valid name. Advisory, Python-only, conservative (stays silent on anything it can't verify with high confidence). |
-| Blast-radius on pre-edit | Capability 4. Lists all importers of a shared module before an edit; `impact_analyze` reads this cache instead of scanning cold. |
-| Outcome feedback loop (`mining/outcomes.py`) | Capability 6. Logs injection kinds (memory/prediction/precheck/blast) + following test pass/fail; `session_mine(reflect)` surfaces injection precision and LLM-synthesized insights. |
-| Hybrid search auto-refresh (miner Phase 5) | `memory(hybrid_search)` no longer requires a prior `embed_all` — the miner auto-refreshes embeddings. |
+| Scorer daemon memory leak fixed | The daemon ran the model call on the per-connection thread, and PyTorch keeps per-thread state it never frees — ~0.73 MB retained per request, dead-linear at +146 MB per 200 with no plateau. All model calls now run on one pinned thread. Verified flat: 1043.0 → 1043.4 MB over 800 requests. |
+| VRAM spike bounded and explained | Bulk batch 256 → 64. Measured across three batch sizes: peak 8049 / 4826 / 3147 MiB at 256 / 128 / 64. The fit (25.58 MiB per row + 668 MiB fixed) predicts the middle point to 0.0% error — it is forward-pass attention memory, not a leak, and VRAM returns to baseline every run. |
+| Encoder input capped | `MAX_ENCODE_CHARS = 2000`, server-side. The encoder discards past 512 tokens anyway, so oversized text was tokenized at full cost and thrown away, ratcheting the allocator high-water mark. |
+| `bench_scorer_thread_affinity` | 10 checks, including a source guard that fails if any call site in `_handle_client` bypasses the model pool — the leak returns silently the moment one does. |
 
-## Done / Shipped (v0.8)
+## Done / Shipped (v0.8.12)
 
 | Feature | Notes |
 |---------|-------|
-| Tool surface trimmed (19 → 16) | Removed `loop` (loop detection is hook-automatic and per-session), `output` (its `validate_code`/`validate_result` checks are covered by `audit_batch`'s inline mode), and `scout_analyze` (zero recorded use). |
-| Ollama is now optional | Used only by `memory(consolidate)` and `session_mine(reflect)` insight synthesis (both background, both degrade silently) plus `scout_search` when available. Everything proactive — hooks, code index, precheck, blast-radius, injection scoring — is LLM-free. |
-| `convention(check)` made deterministic | Pattern check against stored conventions; the LLM mode (a false-positive machine) was removed. |
-| `file_summarize` is structural only | The `mode` parameter and the LLM "detailed" mode were removed — purpose/exports/deps/complexity from structure analysis. |
-| `audit_batch` / `find_similar_issues` documented as LLM-free | Pure regex/AST, no network (they always were; now the docs say so). |
-| Per-session loop-detection state | Edit counts and test results moved from the shared `loop_detector.json` to `sessions/<sid>.json`; two concurrent sessions no longer cross-contaminate. The old file is abandoned (harmless). |
-| Pre-edit no longer records edits | Only post-edit records, so denied/failed edits aren't counted toward the loop threshold. |
-| Session-mining robustness | A session that grows after indexing (PreCompact then SessionEnd) MERGES counts instead of resetting; miner phases are error-isolated and `mining_status.json` records which phase failed (`phase_errors`). |
-| New-project auto-registration | Auto-logged mistakes/decisions in a brand-new project are no longer dropped — the project is registered in the manifest first. |
-| `CLAUDE_ENGRAM_DIR` env var | Overrides the storage location (default `~/.claude_engram`); also the supported test-isolation seam. |
-| `memory(embed_all)` fix | Crashed with a `NameError` since the args rename; now reads `force` from the call args. |
-| Configurable embedding model | `CLAUDE_ENGRAM_EMBED_MODEL` / `CLAUDE_ENGRAM_EMBED_DIM` (or `config.json`). All embedding stores are signature-stamped (`model@dim`) and rebuild on model change — vector spaces are never mixed. |
-| Default encoder → `BAAI/bge-base-en-v1.5` | Ungated (no HF account or token), ~440MB on first use. Decision-capture semantic F1 measured at fixed thresholds: `all-MiniLM-L6-v2` 37.7%, `embeddinggemma-300m@256` 67.3% (license-gated), `bge-small-en-v1.5` 70.7%, `bge-base-en-v1.5` 72.7%. MiniLM stays one config line away for low-RAM setups. |
-| Pre-edit hook ~2x faster | ~400ms to ~220ms median: stdlib-only `hooks/hot_reader.py`, lazy `tools/__init__`, one memory.json parse per hook, and banner dedup (a mistake no longer appears in two sections). |
-| MCP launch hardening | `install.py` points `.mcp.json` straight at the venv python instead of the `.bat` wrapper (fewer process layers between the host and the server under load). |
-| Sharded session-search embeddings | Monthly `.npy` shards replace the single ever-growing matrix (an 80MB+ full rewrite at every session end); v1 stores migrate automatically; optional `CLAUDE_ENGRAM_SESSION_RETENTION_DAYS` pruning. |
-| Append-aware re-mining | A session that grows after indexing (PreCompact then SessionEnd, or resumed days later) now contributes its new tail to search embeddings (per-file watermarks) and is re-extracted for decisions/mistakes. Previously grown sessions were skipped as already-seen. |
-| JSONL schema canary | The miner tracks what fraction of log lines it recognizes; a collapse vs the historical baseline (a Claude Code log-format change) warns at session start instead of degrading silently. |
-| Hook daemon | The scorer server doubles as a warm hook dispatcher; high-frequency hooks become thin `python -S` clients (one TCP round trip, in-daemon ~15-25ms) with a full in-process fallback. Heaviest hook measured 313ms → 216ms median on Windows; Linux gains more (cheaper process spawn). |
-| Proactive recall before Read | `<engram-read-context>` before Read of an indexed file: code-index orientation (module, key symbols, dependents) + the file's most relevant memories. Once per file per session; subagents skipped. Optional `CLAUDE_ENGRAM_LAST_FILE_PATH` statusline mirror. |
-| Outcome feedback loop CLOSED | Cap 6 graduates from measure-only: per-kind pass-rate lift becomes a bounded (0.8-1.2x) multiplier on the memory-injection relevance gate, computed by the miner, applied by the pre-edit scorer. Kinds without enough samples stay neutral. |
-| Isolated-storage servers | `scorer_port`/`scorer_pid`/`scorer_model` and the decision-template cache honor `CLAUDE_ENGRAM_DIR` — tests and parallel storage roots get their own daemon instead of colliding with the real one. |
-| No emojis in any output | — |
+| Consolidation stopped deleting memories | It kept the top 5 originals and dropped the rest by reassigning `proj.entries` — unrecoverable, and against the store's own "nothing is lost without review" rule. Latent until v0.8.9 made the operation reachable. Merged members are now archived. |
+| `bench_consolidate_safety` | 7 checks: nothing evaporates, every dropped member is archived and restorable by id, rules and mistakes are never consolidated. Uses a fake LLM client so it needs no Ollama. |
 
-## Done / Shipped (v0.8.1)
+## Done / Shipped (v0.8.11)
 
 | Feature | Notes |
 |---------|-------|
-| Error deja-vu | PostToolUseFailure matches the fresh error against mined recurring errors (`patterns.json` — real how-to-avoid text) and the hot mistake store, and injects the past fix inline at failure time. Template matching reuses the miner's signature normalization, guarded by quoted-identifier overlap so an unrelated class never inherits someone else's fix. |
-| Symbol lookup | `deps_map(symbol="X")` answers "where is X defined?" from the code index: defining file, signature (`__init__` + methods for classes), and reverse-import blast radius. Typo-tolerant (closest-name suggestion). No grep, no LLM. |
-| Sub-project code-index freshness | The miner's code-index phase only built the mined project's index, and the workspace walk prunes nested project dirs — sub-project indexes went stale forever (one real index was 13 days old; another had never been built). Phase 6 now also refreshes every sub-project edited in the last ~10 sessions. |
-| Mistake hygiene | Auto-captured mistakes that never recurred (3+ weeks old, signature absent from mined recurring errors, no overlap with recently-edited files) move to the archive in miner phase 5. Manual `log_mistake` entries and rules are untouched; archived entries stay searchable and restorable. |
-| `archived_at` honored by hook readers | Pre-existing bug: `acknowledge_mistake` set the flag but hook readers never filtered it, so acknowledged mistakes kept injecting. Hot readers and banner counters now skip archived entries, and `acknowledge_mistake` does a real move into `archive.json`. |
-| Known-good test commands | PASS/FAIL bash test runs are tracked per project (`test_commands.json`); session start surfaces the top currently-passing commands. Throwaway shapes (inline `python -c`, heredocs, `.scratch` scripts) are never recorded; a command whose latest run failed drops out until it passes again. |
+| The hot tier can shrink again | The miner mints auto-captured decisions at a hardcoded `relevance=7` and the archive exemption was `>= 7` — every one was born permanently exempt. 231 decisions sat untouched for 2+ weeks and could not be archived. Exemption is now `ARCHIVE_EXEMPT_RELEVANCE = 8`, above every default. |
+| `bench_archive_exemption` | 12 checks. Parses the real mint sites with `ast` and fails if any age-eligible hardcoded relevance ever reaches the exemption again. |
 
-## Done / Shipped (v0.8.2)
+## Done / Shipped (v0.8.10)
 
 | Feature | Notes |
 |---------|-------|
-| GPU embeddings (auto) | The encoder loads on `cuda` automatically when a CUDA torch is installed (`CLAUDE_ENGRAM_DEVICE` overrides; a broken CUDA runtime degrades to cpu instead of killing the scorer). Vectors are device-identical, so the device is deliberately NOT part of the embedding signature — switching never rebuilds stores. `embed_batch` uses batch 256 on GPU (64 on CPU); 512 chunks measured at ~430ms through the TCP daemon on an RTX 4070 SUPER. `claude_engram_status` reports the active device via the `scorer_device` breadcrumb. |
-| Live mining ticks | The Stop hook (every turn end) spawns a debounced incremental mine (`CLAUDE_ENGRAM_LIVE_MINE`, default 300s; `0`/`off` disables): session index, extraction, search embeddings, and the two most-recent code indexes refresh DURING the session. All phases are cursor/watermark-keyed, so a tick costs the new transcript tail. `session_mine(search)` now sees this session's earlier work. Patterns and memory maintenance stay session-end work. |
-| Decision-gate retune for bge-base | `AMBIGUITY_MARGIN` 0.05 → 0.025 (the 0.05 was tuned on MiniLM). Bench: semantic F1 72.7% → 76.9% (recall 66.7 → 77.5, precision 80.0 → 76.2), combined 77.4% → 79.0%. `DECISION_THRESHOLD` confirmed a dead knob below 0.575 (the capture cutoff binds first) and left at 0.45. |
+| One name per concept on the ring | Records carried both the checkpoint and handoff vocabulary for six concepts, verified byte-identical across all 129 records that had both. The twin is no longer written. `task_description` / `summary` are NOT a twin pair (110 of 129 differ) and stay split. |
+| Two unguarded readers fixed | The banner gated on `pending_steps` and restore on `key_decisions`, both without fallback — so handoff-shaped records silently lost those lines. |
+| `bench_ring_vocabulary` | 19 checks, including that a collapsed record renders the same as a legacy dual-vocabulary one through both the banner and restore. No migration needed. |
 
-## Done / Shipped (v0.8.3)
-
-| Feature | Notes |
-|---------|-------|
-| GPU policy split: cpu-resident, GPU-transient | Supersedes the v0.8.2 resident-GPU default, which parked weights + a CUDA context (~1GB VRAM) on the card for the daemon's whole lifetime — and live-mining ticks keep that daemon warm all day, so it read as a VRAM leak. Now: the resident daemon and every in-process fallback stay on cpu (zero VRAM parked); bulk jobs (>= `CLAUDE_ENGRAM_GPU_BULK_MIN`, default 512 texts) run in a transient worker (`embed_worker.py`) that loads on cuda, encodes once, and exits — process exit is the only way to fully release a CUDA context. `CLAUDE_ENGRAM_DEVICE` forces one device everywhere. Verified cuda/cpu vectors identical (cos 1.000000) — device switching never rebuilds stores. |
-| In-process fallback model cached | `score_decision_semantic`'s daemon-down fallback loaded a fresh SentenceTransformer per call, uncached — any long-lived process hitting it re-paid ~500ms + ~1GB per prompt (and briefly, on v0.8.2, did so on the GPU). Now cached once per process, on cpu. |
-| Single-instance daemon startup | Two sessions racing to spawn the scorer left an orphan (last PORT_FILE writer wins; the loser idled 30 min holding a loaded model). `serve()` now exits immediately when a live server with the same embedding signature already owns PORT_FILE. |
-
-## Done / Shipped (v0.8.4)
+## Done / Shipped (v0.8.9)
 
 | Feature | Notes |
 |---------|-------|
-| Curated-lessons bridge (opt-in) | Dated entries (`YYYY-MM-DD — insight`) in user-curated note files sync as protected `lesson` memories: never archived/decayed/deduped (the file is the source of truth — edits update, removals retire), injected with a +0.25 scoring bonus, and triggered through the code index (a lesson naming a module gets `related_files` = the files importing it). STRICTLY opt-in via config.json `lessons_globs`; no default path ships. |
-| Project-scoped, recency-decayed pattern banner | Recurring errors are attributed to the sub-projects whose sessions produced them and filtered at session start by what the LAST session touched — project A's session no longer opens with project B's errors. Errors unseen for 30 days drop out entirely (fixed errors used to pin the top slots forever by raw session count). |
-| Struggles metric made causal | Was: basename-keyed + "the session had an error somewhere" — every often-edited file looked like a struggle ("CLAUDE.md, 4 sessions, 4 errors") and all `__init__.py` files pooled into one phantom. Now: full-path keys, and errors_nearby counts only sessions where an extracted mistake actually references the file. Zero attributable errors = not a struggle. |
-| TDD-aware mistake capture | Failing test invocations are tracked as test results but no longer auto-logged as mistakes — deliberate RED-phase failures (ModuleNotFoundError before implementing, expected assertion fails) were drowning the mistake store. Real bugs that only manifest in tests keep failing and surface via the transcript miner. |
-| Mistake-store modernization (migration `0.8.4`) | One-time, automatic, archive-never-delete: (1) legacy in-place `archived_at` flags move into archive.json for real; (2) machine-written mistakes PROVABLY fixed against the current code index (module now resolves / class now has that attribute) are archived. Manual `log_mistake` entries untouched. |
-| Hygiene gate widened to `session_mining` | The 0.8.1 stale-mistake hygiene only matched `source="auto-detected"` — but 90%+ of real stores are miner-stamped `session_mining`. Both are machine-written; both now age out. Live effect on the reference store: 282 → 71 hot mistakes (all archived, restorable). |
-| Decision capture: word-boundary cuts | Decisions were stored sliced at 150 chars mid-word ("well probaly do all if i..."). Capture now keeps the full matched sentence to 300 chars cut at a word boundary; banner displays cut at 200 the same way. |
-| Honest activity counts | "893 prompts" counted every `type=user` JSONL line — in Claude Code logs every tool result is one. New `prompt_count` field counts real typed prompts (`user_message_count` keeps its semantics: the append-aware re-mine watermarks compare it); banner shows "N prompts" / "N tool errors". |
-| Rule banner deduped vs CLAUDE.md | Rules whose content is already in the project's CLAUDE.md (in context every turn) are suppressed from session-start and post-compact banners — ends the CLAUDE.md / engram-rules / MEMORY.md triple-injection. Rules remain enforced and listable. |
-| Windows embeddings-save fix | `embed_all_memories` held the live mmap returned by the loader while `np.save` targeted the same embeddings.npy — Errno 22 on Windows, silently freezing memory-embedding updates once a store had both existing vectors and pending work. The mmap handle is dropped after rows are copied. |
+| `memory(consolidate)` and `memory(clusters)` reachable | Both were fully implemented and named as valid in the tool's own error string, but were missing from the MCP schema enum and had no dispatch branch — uncallable. This is why a store could reach hundreds of hot decisions while `cleanup` correctly reported nothing to merge: cleanup removes near-duplicates, consolidate compresses a topic. |
 
 ## Done / Shipped (v0.8.8)
 
@@ -159,6 +115,87 @@
 | Teaser label is self-identifying | `CHECKPOINT [manual, 2.1h ago, grommet, task_1782849358]` — kind + project + task_id, so the model can `checkpoint_restore(task_id=…)` exactly what was teased, and a cross-project breadcrumb is obviously not yours. |
 | Subagent stop guard | A hook stop carrying `agent_id` no longer writes the parent project's ring (insurance — engram registers only Stop, but background agents may fire it). |
 | `get_state_file` honors `CLAUDE_ENGRAM_DIR` | The per-session hook-state path was the one storage path still hardcoded to `~/.claude_engram`, breaking the documented test-isolation seam. |
+
+## Done / Shipped (v0.8.4)
+
+| Feature | Notes |
+|---------|-------|
+| Curated-lessons bridge (opt-in) | Dated entries (`YYYY-MM-DD — insight`) in user-curated note files sync as protected `lesson` memories: never archived/decayed/deduped (the file is the source of truth — edits update, removals retire), injected with a +0.25 scoring bonus, and triggered through the code index (a lesson naming a module gets `related_files` = the files importing it). STRICTLY opt-in via config.json `lessons_globs`; no default path ships. |
+| Project-scoped, recency-decayed pattern banner | Recurring errors are attributed to the sub-projects whose sessions produced them and filtered at session start by what the LAST session touched — project A's session no longer opens with project B's errors. Errors unseen for 30 days drop out entirely (fixed errors used to pin the top slots forever by raw session count). |
+| Struggles metric made causal | Was: basename-keyed + "the session had an error somewhere" — every often-edited file looked like a struggle ("CLAUDE.md, 4 sessions, 4 errors") and all `__init__.py` files pooled into one phantom. Now: full-path keys, and errors_nearby counts only sessions where an extracted mistake actually references the file. Zero attributable errors = not a struggle. |
+| TDD-aware mistake capture | Failing test invocations are tracked as test results but no longer auto-logged as mistakes — deliberate RED-phase failures (ModuleNotFoundError before implementing, expected assertion fails) were drowning the mistake store. Real bugs that only manifest in tests keep failing and surface via the transcript miner. |
+| Mistake-store modernization (migration `0.8.4`) | One-time, automatic, archive-never-delete: (1) legacy in-place `archived_at` flags move into archive.json for real; (2) machine-written mistakes PROVABLY fixed against the current code index (module now resolves / class now has that attribute) are archived. Manual `log_mistake` entries untouched. |
+| Hygiene gate widened to `session_mining` | The 0.8.1 stale-mistake hygiene only matched `source="auto-detected"` — but 90%+ of real stores are miner-stamped `session_mining`. Both are machine-written; both now age out. Live effect on the reference store: 282 → 71 hot mistakes (all archived, restorable). |
+| Decision capture: word-boundary cuts | Decisions were stored sliced at 150 chars mid-word ("well probaly do all if i..."). Capture now keeps the full matched sentence to 300 chars cut at a word boundary; banner displays cut at 200 the same way. |
+| Honest activity counts | "893 prompts" counted every `type=user` JSONL line — in Claude Code logs every tool result is one. New `prompt_count` field counts real typed prompts (`user_message_count` keeps its semantics: the append-aware re-mine watermarks compare it); banner shows "N prompts" / "N tool errors". |
+| Rule banner deduped vs CLAUDE.md | Rules whose content is already in the project's CLAUDE.md (in context every turn) are suppressed from session-start and post-compact banners — ends the CLAUDE.md / engram-rules / MEMORY.md triple-injection. Rules remain enforced and listable. |
+| Windows embeddings-save fix | `embed_all_memories` held the live mmap returned by the loader while `np.save` targeted the same embeddings.npy — Errno 22 on Windows, silently freezing memory-embedding updates once a store had both existing vectors and pending work. The mmap handle is dropped after rows are copied. |
+
+## Done / Shipped (v0.8.3)
+
+| Feature | Notes |
+|---------|-------|
+| GPU policy split: cpu-resident, GPU-transient | Supersedes the v0.8.2 resident-GPU default, which parked weights + a CUDA context (~1GB VRAM) on the card for the daemon's whole lifetime — and live-mining ticks keep that daemon warm all day, so it read as a VRAM leak. Now: the resident daemon and every in-process fallback stay on cpu (zero VRAM parked); bulk jobs (>= `CLAUDE_ENGRAM_GPU_BULK_MIN`, default 512 texts) run in a transient worker (`embed_worker.py`) that loads on cuda, encodes once, and exits — process exit is the only way to fully release a CUDA context. `CLAUDE_ENGRAM_DEVICE` forces one device everywhere. Verified cuda/cpu vectors identical (cos 1.000000) — device switching never rebuilds stores. |
+| In-process fallback model cached | `score_decision_semantic`'s daemon-down fallback loaded a fresh SentenceTransformer per call, uncached — any long-lived process hitting it re-paid ~500ms + ~1GB per prompt (and briefly, on v0.8.2, did so on the GPU). Now cached once per process, on cpu. |
+| Single-instance daemon startup | Two sessions racing to spawn the scorer left an orphan (last PORT_FILE writer wins; the loser idled 30 min holding a loaded model). `serve()` now exits immediately when a live server with the same embedding signature already owns PORT_FILE. |
+
+## Done / Shipped (v0.8.2)
+
+| Feature | Notes |
+|---------|-------|
+| GPU embeddings (auto) | The encoder loads on `cuda` automatically when a CUDA torch is installed (`CLAUDE_ENGRAM_DEVICE` overrides; a broken CUDA runtime degrades to cpu instead of killing the scorer). Vectors are device-identical, so the device is deliberately NOT part of the embedding signature — switching never rebuilds stores. `embed_batch` uses batch 256 on GPU (64 on CPU); 512 chunks measured at ~430ms through the TCP daemon on an RTX 4070 SUPER. `claude_engram_status` reports the active device via the `scorer_device` breadcrumb. |
+| Live mining ticks | The Stop hook (every turn end) spawns a debounced incremental mine (`CLAUDE_ENGRAM_LIVE_MINE`, default 300s; `0`/`off` disables): session index, extraction, search embeddings, and the two most-recent code indexes refresh DURING the session. All phases are cursor/watermark-keyed, so a tick costs the new transcript tail. `session_mine(search)` now sees this session's earlier work. Patterns and memory maintenance stay session-end work. |
+| Decision-gate retune for bge-base | `AMBIGUITY_MARGIN` 0.05 → 0.025 (the 0.05 was tuned on MiniLM). Bench: semantic F1 72.7% → 76.9% (recall 66.7 → 77.5, precision 80.0 → 76.2), combined 77.4% → 79.0%. `DECISION_THRESHOLD` confirmed a dead knob below 0.575 (the capture cutoff binds first) and left at 0.45. |
+
+## Done / Shipped (v0.8.1)
+
+| Feature | Notes |
+|---------|-------|
+| Error deja-vu | PostToolUseFailure matches the fresh error against mined recurring errors (`patterns.json` — real how-to-avoid text) and the hot mistake store, and injects the past fix inline at failure time. Template matching reuses the miner's signature normalization, guarded by quoted-identifier overlap so an unrelated class never inherits someone else's fix. |
+| Symbol lookup | `deps_map(symbol="X")` answers "where is X defined?" from the code index: defining file, signature (`__init__` + methods for classes), and reverse-import blast radius. Typo-tolerant (closest-name suggestion). No grep, no LLM. |
+| Sub-project code-index freshness | The miner's code-index phase only built the mined project's index, and the workspace walk prunes nested project dirs — sub-project indexes went stale forever (one real index was 13 days old; another had never been built). Phase 6 now also refreshes every sub-project edited in the last ~10 sessions. |
+| Mistake hygiene | Auto-captured mistakes that never recurred (3+ weeks old, signature absent from mined recurring errors, no overlap with recently-edited files) move to the archive in miner phase 5. Manual `log_mistake` entries and rules are untouched; archived entries stay searchable and restorable. |
+| `archived_at` honored by hook readers | Pre-existing bug: `acknowledge_mistake` set the flag but hook readers never filtered it, so acknowledged mistakes kept injecting. Hot readers and banner counters now skip archived entries, and `acknowledge_mistake` does a real move into `archive.json`. |
+| Known-good test commands | PASS/FAIL bash test runs are tracked per project (`test_commands.json`); session start surfaces the top currently-passing commands. Throwaway shapes (inline `python -c`, heredocs, `.scratch` scripts) are never recorded; a command whose latest run failed drops out until it passes again. |
+
+## Done / Shipped (v0.8)
+
+| Feature | Notes |
+|---------|-------|
+| Tool surface trimmed (19 → 16) | Removed `loop` (loop detection is hook-automatic and per-session), `output` (its `validate_code`/`validate_result` checks are covered by `audit_batch`'s inline mode), and `scout_analyze` (zero recorded use). |
+| Ollama is now optional | Used only by `memory(consolidate)` and `session_mine(reflect)` insight synthesis (both background, both degrade silently) plus `scout_search` when available. Everything proactive — hooks, code index, precheck, blast-radius, injection scoring — is LLM-free. |
+| `convention(check)` made deterministic | Pattern check against stored conventions; the LLM mode (a false-positive machine) was removed. |
+| `file_summarize` is structural only | The `mode` parameter and the LLM "detailed" mode were removed — purpose/exports/deps/complexity from structure analysis. |
+| `audit_batch` / `find_similar_issues` documented as LLM-free | Pure regex/AST, no network (they always were; now the docs say so). |
+| Per-session loop-detection state | Edit counts and test results moved from the shared `loop_detector.json` to `sessions/<sid>.json`; two concurrent sessions no longer cross-contaminate. The old file is abandoned (harmless). |
+| Pre-edit no longer records edits | Only post-edit records, so denied/failed edits aren't counted toward the loop threshold. |
+| Session-mining robustness | A session that grows after indexing (PreCompact then SessionEnd) MERGES counts instead of resetting; miner phases are error-isolated and `mining_status.json` records which phase failed (`phase_errors`). |
+| New-project auto-registration | Auto-logged mistakes/decisions in a brand-new project are no longer dropped — the project is registered in the manifest first. |
+| `CLAUDE_ENGRAM_DIR` env var | Overrides the storage location (default `~/.claude_engram`); also the supported test-isolation seam. |
+| `memory(embed_all)` fix | Crashed with a `NameError` since the args rename; now reads `force` from the call args. |
+| Configurable embedding model | `CLAUDE_ENGRAM_EMBED_MODEL` / `CLAUDE_ENGRAM_EMBED_DIM` (or `config.json`). All embedding stores are signature-stamped (`model@dim`) and rebuild on model change — vector spaces are never mixed. |
+| Default encoder → `BAAI/bge-base-en-v1.5` | Ungated (no HF account or token), ~440MB on first use. Decision-capture semantic F1 measured at fixed thresholds: `all-MiniLM-L6-v2` 37.7%, `embeddinggemma-300m@256` 67.3% (license-gated), `bge-small-en-v1.5` 70.7%, `bge-base-en-v1.5` 72.7%. MiniLM stays one config line away for low-RAM setups. |
+| Pre-edit hook ~2x faster | ~400ms to ~220ms median: stdlib-only `hooks/hot_reader.py`, lazy `tools/__init__`, one memory.json parse per hook, and banner dedup (a mistake no longer appears in two sections). |
+| MCP launch hardening | `install.py` points `.mcp.json` straight at the venv python instead of the `.bat` wrapper (fewer process layers between the host and the server under load). |
+| Sharded session-search embeddings | Monthly `.npy` shards replace the single ever-growing matrix (an 80MB+ full rewrite at every session end); v1 stores migrate automatically; optional `CLAUDE_ENGRAM_SESSION_RETENTION_DAYS` pruning. |
+| Append-aware re-mining | A session that grows after indexing (PreCompact then SessionEnd, or resumed days later) now contributes its new tail to search embeddings (per-file watermarks) and is re-extracted for decisions/mistakes. Previously grown sessions were skipped as already-seen. |
+| JSONL schema canary | The miner tracks what fraction of log lines it recognizes; a collapse vs the historical baseline (a Claude Code log-format change) warns at session start instead of degrading silently. |
+| Hook daemon | The scorer server doubles as a warm hook dispatcher; high-frequency hooks become thin `python -S` clients (one TCP round trip, in-daemon ~15-25ms) with a full in-process fallback. Heaviest hook measured 313ms → 216ms median on Windows; Linux gains more (cheaper process spawn). |
+| Proactive recall before Read | `<engram-read-context>` before Read of an indexed file: code-index orientation (module, key symbols, dependents) + the file's most relevant memories. Once per file per session; subagents skipped. Optional `CLAUDE_ENGRAM_LAST_FILE_PATH` statusline mirror. |
+| Outcome feedback loop CLOSED | Cap 6 graduates from measure-only: per-kind pass-rate lift becomes a bounded (0.8-1.2x) multiplier on the memory-injection relevance gate, computed by the miner, applied by the pre-edit scorer. Kinds without enough samples stay neutral. |
+| Isolated-storage servers | `scorer_port`/`scorer_pid`/`scorer_model` and the decision-template cache honor `CLAUDE_ENGRAM_DIR` — tests and parallel storage roots get their own daemon instead of colliding with the real one. |
+| No emojis in any output | — |
+
+## Done / Shipped (v0.6)
+
+| Feature | Notes |
+|---------|-------|
+| Tool surface consolidation (21 → 19) | Removed `code_pattern_check` (dup of `convention`); folded `code_quality_check` into `audit_batch` (file-paths mode vs inline code/language mode); `instruction_*` context ops removed (use `memory add_rule`); `checkpoint_*` are now primary, `handoff_*` are deprecated aliases. |
+| Per-project code index (`mining/code_index.py`) | Miner Phase 6. AST/regex symbol table per project: exports, classes, methods+signatures, imports, reverse-dependency edges. Sub-project scoped, mtime-incremental, LLM-free. |
+| Pre-edit import/export verification (`hooks/precheck.py`) | Capability 1. Warns before an edit if an import won't resolve against the code index; suggests the closest valid name. Advisory, Python-only, conservative (stays silent on anything it can't verify with high confidence). |
+| Blast-radius on pre-edit | Capability 4. Lists all importers of a shared module before an edit; `impact_analyze` reads this cache instead of scanning cold. |
+| Outcome feedback loop (`mining/outcomes.py`) | Capability 6. Logs injection kinds (memory/prediction/precheck/blast) + following test pass/fail; `session_mine(reflect)` surfaces injection precision and LLM-synthesized insights. |
+| Hybrid search auto-refresh (miner Phase 5) | `memory(hybrid_search)` no longer requires a prior `embed_all` — the miner auto-refreshes embeddings. |
 
 ## What's Next
 
